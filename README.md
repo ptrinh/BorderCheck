@@ -13,6 +13,10 @@ on what was left open. BorderCheck looks for:
 For each one it finds, it says how to fix it. It runs on macOS, Windows and Linux and needs no admin rights.
 A plain run only reads: it changes nothing and sends nothing.
 
+It is small and fast. BorderCheck is one file of about 8 MB with nothing else to install, and a full check takes
+less than a second on an Apple M5 MacBook. An installed copy does not stay running in the background: the system
+starts it once an hour, it does its work and exits.
+
 It is not an antivirus. It does not catch malware; it limits what malware, or a person, can reach. A few of its
 findings are strong signs that something hostile is already installed (a startup item that downloads and runs
 code, an extension IT has blocked, a crack tool); when it sees one it says so first and, when installed, tells IT
