@@ -57,3 +57,27 @@ func TestOpenReportPage(t *testing.T) {
 		t.Errorf("err %v, term %q", err, term)
 	}
 }
+
+func TestSetUpRunsEachPartAndSavesWhatItDid(t *testing.T) {
+	var ran []string
+	oldL, oldC := launcher.ensure, command.ensure
+	t.Cleanup(func() { launcher.ensure, command.ensure = oldL, oldC })
+	launcher.ensure = func(Env, Config) error { ran = append(ran, "launcher"); return errors.New("no room") }
+	command.ensure = func(_ Env, st *State) error { ran = append(ran, "command"); st.CommandSetUp = true; return nil }
+
+	if err := SetUp(t.Context(), Env{Dir: t.TempDir(), Out: &strings.Builder{}}); err == nil {
+		t.Error("not installed: want an error")
+	}
+	p := newPortal(t)
+	env, out := enrolledEnv(t, p)
+	if err := SetUp(t.Context(), env); err != nil {
+		t.Fatal(err)
+	}
+	// One part failing is logged and does not stop the next.
+	if strings.Join(ran, ",") != "launcher,command" || !strings.Contains(out.String(), "no room") {
+		t.Errorf("ran %v\n%s", ran, out)
+	}
+	if !readState(t, env).CommandSetUp {
+		t.Error("what the set-up did was not saved")
+	}
+}

@@ -33,6 +33,7 @@ import (
 	"net/mail"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -115,6 +116,8 @@ type State struct {
 	// CommandSetUp: the person's shell profile (macOS) or PATH (Windows) was
 	// given what plain `bordercheck` needs, once (see command).
 	CommandSetUp bool `json:"command_set_up,omitempty"`
+	// UpdatedTo is set while a run has just installed that version; never saved.
+	UpdatedTo string `json:"-"`
 	// NotifierTried is when the hourly run last tried to install the macOS
 	// app on a Mac that has none (see adoptNotifier).
 	NotifierTried time.Time `json:"notifier_tried,omitzero"`
@@ -369,6 +372,45 @@ func Uninstall(env Env) error {
 	return err
 }
 
+// setUp gives the install what this version adds around the program itself:
+// the macOS app on a Mac without it, the entry in the OS's app search, and the
+// plain `bordercheck` command. Each part does nothing when it is already
+// there. The hourly run calls it, and so does an update, so that what a new
+// version brings is there at once rather than an hour later.
+func setUp(ctx context.Context, env Env, cfg *Config, st *State, now time.Time) {
+	adoptNotifier(ctx, env, cfg, st, now)
+	if err := launcher.ensure(env, *cfg); err != nil {
+		fmt.Fprintf(env.Out, "%s no %s entry in this computer's app search: %v\n", now.Format(time.RFC3339), LauncherName, err)
+	}
+	if err := command.ensure(env, st); err != nil {
+		fmt.Fprintf(env.Out, "%s plain \"bordercheck\" not set up in the terminal: %v\n", now.Format(time.RFC3339), err)
+	}
+}
+
+// SetUp is the hidden `bordercheck setup`: what a version that has just been
+// installed by an update is run with, once, by the version it replaced.
+func SetUp(ctx context.Context, env Env) error {
+	var cfg Config
+	if err := readJSON(filepath.Join(env.Dir, "config.json"), &cfg); err != nil {
+		return fmt.Errorf("BorderCheck is not installed (%w); run: bordercheck install", err)
+	}
+	statePath := filepath.Join(env.Dir, "state.json")
+	var st State
+	_ = readJSON(statePath, &st)
+	setUp(ctx, env, &cfg, &st, time.Now())
+	return writeJSON(statePath, st)
+}
+
+// runNewVersion runs the just-installed program's `setup`; tests replace it.
+// A version from before `setup` existed is never the new one.
+var runNewVersion = func(ctx context.Context, env Env, bin string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "setup")
+	cmd.Stdout, cmd.Stderr = env.Out, env.Out
+	return cmd.Run()
+}
+
 // Send is what the service runs every hour. It sends a report when the policy's
 // interval has passed since the last one that got through, or right away with force.
 func Send(ctx context.Context, env Env, force bool) error {
@@ -384,13 +426,7 @@ func Send(ctx context.Context, env Env, force bool) error {
 	}
 	statePath := filepath.Join(env.Dir, "state.json")
 	now := time.Now()
-	adoptNotifier(ctx, env, &cfg, &st, now)
-	if err := launcher.ensure(env, cfg); err != nil {
-		fmt.Fprintf(env.Out, "%s no %s entry in this computer's app search: %v\n", now.Format(time.RFC3339), LauncherName, err)
-	}
-	if err := command.ensure(env, &st); err != nil {
-		fmt.Fprintf(env.Out, "%s plain \"bordercheck\" not set up in the terminal: %v\n", now.Format(time.RFC3339), err)
-	}
+	setUp(ctx, env, &cfg, &st, now)
 	// A revoked install asks the portal again once a day, not every hour.
 	if tok != nil && !st.Revoked.IsZero() && !force && now.Sub(st.RevokedChecked) < revokedRetry {
 		fmt.Fprintf(env.Out, "%s revoked by IT since %s; asking %s again after %s\n", now.Format(time.RFC3339),
@@ -548,7 +584,12 @@ func Update(ctx context.Context, env Env) error {
 	if _, err := currentPolicy(ctx, env, cfg, tok); err != nil {
 		return err
 	}
-	err = updateBinary(ctx, env, cfg, &st, time.Now())
+	now := time.Now()
+	err = updateBinary(ctx, env, cfg, &st, now)
+	if st.UpdatedTo == "" { // nothing new: make sure this version's own set-up is in place
+		setUp(ctx, env, &cfg, &st, now)
+	}
+	st.UpdatedTo = ""
 	return errors.Join(err, writeJSON(filepath.Join(env.Dir, "state.json"), st))
 }
 
@@ -567,6 +608,15 @@ func updateBinary(ctx context.Context, env Env, cfg Config, st *State, now time.
 	case res.Updated:
 		fmt.Fprintf(env.Out, "%s updated %s → %s; the next run uses it\n", now.Format(time.RFC3339), res.Current, res.Latest)
 		refreshNotifier(ctx, env, res.Latest, now)
+		// Let the new version set up what it adds now. It writes state.json
+		// itself; take over what it recorded, since the caller writes st after this.
+		if err := runNewVersion(ctx, env, filepath.Join(env.Dir, binName())); err == nil {
+			var after State
+			if readJSON(filepath.Join(env.Dir, "state.json"), &after) == nil {
+				st.CommandSetUp, st.NotifierTried = after.CommandSetUp, after.NotifierTried
+			}
+		}
+		st.UpdatedTo = res.Latest
 	default:
 		fmt.Fprintf(env.Out, "%s up to date (%s)\n", now.Format(time.RFC3339), res.Current)
 	}

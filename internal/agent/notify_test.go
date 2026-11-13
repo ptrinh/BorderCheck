@@ -31,6 +31,8 @@ func TestMain(m *testing.M) {
 	// Nor a link in its ~/.local/bin, a line in its shell profile or its PATH.
 	command.ensure = func(Env, *State) error { return nil }
 	command.remove = func(Env) error { return nil }
+	// Nor the "new version" an update test installs: it is not a program.
+	runNewVersion = func(context.Context, Env, string) error { return errors.New("not in tests") }
 	// Nor the notification app: never launched, fetched or checked for real.
 	ntfRun = func(context.Context, string, notifier.Mode, string, string) error { return errors.New("not in tests") }
 	ntfVerify = func(context.Context, string, string) (string, error) { return "", errors.New("not in tests") }

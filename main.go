@@ -116,7 +116,7 @@ func run(args []string) int {
 		switch args[0] {
 		case "help", "--help":
 			return runHelp()
-		case "install", "uninstall", "status", "open", "send", "update", "notifications":
+		case "install", "uninstall", "status", "open", "send", "setup", "update", "notifications":
 			return runAgent(args[0], args[1:])
 		case "fix":
 			return runFix(args[1:])
@@ -362,6 +362,8 @@ func runAgent(cmd string, args []string) int {
 		}
 	case "open":
 		err = agent.Open(ctx, env)
+	case "setup":
+		err = agent.SetUp(ctx, env)
 	case "send":
 		// The service has no terminal: keep a log beside the install, trimmed when it grows.
 		logPath := filepath.Join(dir, "bordercheck.log")
