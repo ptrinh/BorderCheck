@@ -309,6 +309,13 @@
   "screenlock.passwordUnknown": "Could not tell whether a password is needed after sleep.",
   "screenlock.tooLate": "The screen locks only after {after:dur} idle (policy: {max:dur}).",
   "screenlock.unknown": "Could not tell whether a password is needed after sleep or when the screen locks.",
+  "secrets.chatGuard": "To keep secrets out of Claude Code from now on (stop prompts that hold one, refuse commands that print them, hide them in commands' output), run [code]bordercheck guard install[/code].",
+  "secrets.chatInfo": {
+    "one": "For information: 1 secret in AI prompts or recent AI chat history ({files} file(s)). Run [code]bordercheck chats[/code] to check all of the history and see how to remove them.",
+    "other": "For information: {n} secrets in AI prompts or recent AI chat history ({files} file(s)). Run [code]bordercheck chats[/code] to check all of the history and see how to remove them."
+  },
+  "secrets.chatsPartial": "AI chat history is larger than the policy's limit (checks.secrets.ai_chat_max_mb), so only its newest part was read.",
+  "secrets.fix.aiChat": "For a key in an AI assistant's chat history, delete that conversation: the file listed holds it (Claude Code keeps each one as a .jsonl file under [code]~/.claude/projects[/code], Codex under [code]~/.codex/sessions[/code]; Gemini CLI, Copilot, Cursor's agent, Cline and Aider likewise keep one file per conversation or session). A prompt in a prompt history ([code]~/.claude/history.jsonl[/code], [code]~/.codex/history.jsonl[/code], [code].aider.input.history[/code]: what was typed) is one entry there: delete that entry. That removes the copy on this computer; the key was also sent to the assistant's provider. Claude Code deletes conversations older than [code]cleanupPeriodDays[/code] (30 by default, in [code]~/.claude/settings.json[/code]); a shorter period keeps fewer of them on disk.",
   "secrets.fix.linux": "Move each key into the desktop keyring ([code]secret-tool store[/code] / [code]secret-tool lookup[/code], from libsecret) or a password manager CLI such as pass or 1Password [code]op run[/code], then delete the line or file.",
   "secrets.fix.mac": "Move each key into the Keychain behind Touch ID with touchenv (https://github.com/ptrinh/touch-env): [code]touchenv set NAME[/code], then delete the line or file.",
   "secrets.fix.other": "Move each key into a password manager or the OS keyring, then delete the line or file.",
@@ -323,7 +330,8 @@
     "other": "{n} secrets in plain text across {files} file(s), {prod} marked production."
   },
   "secrets.incomplete": "The scan hit its time limit, so some folders were not checked.",
-  "secrets.pass": "No plain-text secrets in shell files, shell history, credential files or .env files.",
+  "secrets.pass": "No plain-text secrets in shell files, shell history, credential files, .env files, AI prompts or recent AI chat history.",
+  "secrets.passOutsideChats": "No plain-text secrets in shell files, shell history, credential files or .env files.",
   "sharing.allowed": "On but allowed by policy: {services}.",
   "sharing.fix.cups": "[code]sudo cupsctl --no-share-printers[/code]",
   "sharing.fix.linuxGnome": "Settings → Sharing → File Sharing → off.",

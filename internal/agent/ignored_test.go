@@ -20,6 +20,8 @@ func TestReportCarriesUserIgnoredWithoutEvidence(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // AI chat history is read from the test home only
+	t.Setenv("CODEX_HOME", "")
 	if err := os.MkdirAll(filepath.Join(home, "app"), 0o700); err != nil {
 		t.Fatal(err)
 	}

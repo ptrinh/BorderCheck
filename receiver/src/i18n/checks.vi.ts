@@ -141,9 +141,13 @@ export const checksVi: CheckCatalog = {
   "docker.fix":
     "Chỉ publish cổng trên localhost ([code]-p 127.0.0.1:5432:5432[/code]). Không dùng [code]--network host[/code] hay [code]--privileged[/code]. Chỉ mount thư mục dự án; không bao giờ mount Docker socket, thư mục home hay thư mục chứa thông tin đăng nhập.",
 
-  "secrets.pass": "Không có secret dạng văn bản thuần trong file shell, lịch sử shell, file thông tin đăng nhập hay file .env.",
+  "secrets.pass": "Không có secret dạng văn bản thuần trong file shell, lịch sử shell, file thông tin đăng nhập, file .env, prompt gửi AI hay lịch sử chat gần đây với AI.",
+  "secrets.passOutsideChats": "Không có secret dạng văn bản thuần trong file shell, lịch sử shell, file thông tin đăng nhập hay file .env.",
+  "secrets.chatInfo": "Để bạn biết: có {n} secret trong prompt gửi AI hoặc lịch sử chat gần đây với AI ({files} file). Chạy [code]bordercheck chats[/code] để kiểm tra toàn bộ lịch sử và xem cách xoá.",
   "secrets.found": "{n} secret dạng văn bản thuần trong {files} file.",
   "secrets.foundProd": "{n} secret dạng văn bản thuần trong {files} file, {prod} secret được đánh dấu production.",
+  "secrets.chatGuard": "Để từ nay giữ secret ngoài Claude Code (chặn prompt có secret, từ chối lệnh in secret ra, che secret trong đầu ra của lệnh), chạy [code]bordercheck guard install[/code].",
+  "secrets.chatsPartial": "Lịch sử chat với AI lớn hơn giới hạn của chính sách (checks.secrets.ai_chat_max_mb), nên chỉ phần mới nhất được đọc.",
   "secrets.incomplete": "Lần quét đã hết thời gian cho phép nên một số thư mục chưa được kiểm tra.",
   "ignore.more": "Ngoài ra còn {n} mục bạn đã bỏ qua.",
   "ignore.all": "Các mục tìm thấy đều là {n} mục bạn đã đánh dấu là không nhạy cảm.",
@@ -156,6 +160,7 @@ export const checksVi: CheckCatalog = {
   "secrets.fix.linux":
     "Chuyển từng key vào keyring của desktop ([code]secret-tool store[/code] / [code]secret-tool lookup[/code], thuộc libsecret) hoặc CLI của trình quản lý mật khẩu như pass hay 1Password [code]op run[/code], rồi xoá dòng hoặc file đó.",
   "secrets.fix.other": "Chuyển từng key vào trình quản lý mật khẩu hoặc keyring của hệ điều hành, rồi xoá dòng hoặc file đó.",
+  "secrets.fix.aiChat": "Với khoá nằm trong lịch sử chat của trợ lý AI, hãy xoá cuộc trò chuyện đó: file được liệt kê chứa nó (Claude Code lưu mỗi cuộc thành một file .jsonl trong [code]~/.claude/projects[/code], Codex trong [code]~/.codex/sessions[/code]; Gemini CLI, Copilot, agent của Cursor, Cline và Aider cũng lưu mỗi cuộc trò chuyện hay phiên thành một file). Prompt trong lịch sử prompt ([code]~/.claude/history.jsonl[/code], [code]~/.codex/history.jsonl[/code], [code].aider.input.history[/code]: những gì đã gõ) là một mục trong đó: xoá mục đó. Việc này xoá bản sao trên máy; khoá cũng đã được gửi tới nhà cung cấp trợ lý. Claude Code tự xoá các cuộc trò chuyện cũ hơn [code]cleanupPeriodDays[/code] (mặc định 30 ngày, đặt trong [code]~/.claude/settings.json[/code]); đặt ngắn hơn thì trên máy giữ lại ít cuộc trò chuyện hơn.",
   "secrets.fix.rotate": 
     "Với key nằm trong lịch sử shell, xoá các dòng đó là đủ. Chỉ cần đổi (rotate) key khi có bằng chứng máy này đã bị xâm nhập.",
 

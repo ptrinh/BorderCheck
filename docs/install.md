@@ -266,6 +266,35 @@ profile line and the Windows `PATH` entry are added once, so removing them by ha
 already at `~/.local/bin/bordercheck` and is not this install's is left alone. `bordercheck uninstall` removes the
 link, the line and the `PATH` entry.
 
+**AI chat history.** `bordercheck chats` lists the secrets in AI assistants' conversation history (Claude Code, Codex,
+Gemini CLI, Copilot, Cursor's agent, Cline, Aider; [which files](policies.md#secrets)), all of it (`-hours N` for less; `-json` for scripts): for each, the item (kind, variable name, last 4 characters of a
+provider token or of a password of 12 characters or more), where (file and line) and what it is (assistant,
+project, date, whether it was typed into the prompt, sent, written by the assistant or printed by a command it ran,
+and what the secret allows). Values are never printed, and none of it goes into a report. It exits `1` when it finds
+something. The `secrets` check reads every prompt typed but of the conversations only the last `ai_chat_hours`
+(48), and reports what it finds there for information ([details](policies.md#secrets)).
+
+**Keeping secrets out of Claude Code.** `bordercheck guard install` adds three hooks to Claude Code's
+`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`), each running the program in a few milliseconds:
+
+| Hook | What it does |
+|---|---|
+| `guard prompt` (`UserPromptSubmit`) | Stops a prompt that holds a secret (the same rules as for chat history) before it reaches the model; Claude Code shows which secret, by kind and last 4 characters. `#allow-secret` anywhere in the prompt lets it through. The stopped prompt is still written to Claude Code's history on this computer. |
+| `guard command` (`PreToolUse` on Bash) | Refuses a command that prints secrets wholesale, and tells the assistant what to do instead: `touchenv get`, `env`, `printenv` or `export` with nothing else, `printenv` of a secret-looking name, `cat`/`head`/`tail`/`less`/`grep`… of a `.env` file (not `.env.example`), `security find-…-password -w`, `op read`, `secret-tool lookup`, `pass show`, `gh auth token`. |
+| `guard output` (`PostToolUse` on Bash) | Replaces the secrets in a command's output with `***REDACTED***` (for a password assigned to a name or in a URL, only the password) before the model sees it, and tells it so. Claude Code then keeps the replaced output in its history too. |
+
+Only Bash: files the assistant reads or changes with its own tools reach it as they are, or an edit could write
+`***REDACTED***` into a file (deny reading secret files with `permissions.deny` instead). A hook that fails or cannot
+read its input lets everything through, so a broken guard never stops anyone from working. Only the hooks' own
+entries are added or removed; the person's other settings and hooks are kept, in their order, and a settings file
+that is not valid JSON is left alone. `bordercheck guard` says which hooks are on, `bordercheck guard uninstall`
+removes them, and `bordercheck uninstall` removes them too when they run that install's program. Nothing sets them
+up on its own: the `secrets` summary and `bordercheck chats` suggest it when they find a secret in Claude Code's
+history and the hooks are not all on.
+
+touchenv (1.8 or later) does the same for the secrets it hands out, with any assistant: `touchenv run` replaces their
+exact values in the command's output when an assistant runs it or the output goes to a program.
+
 **Opening it without a terminal.** `bordercheck open` opens the page in the default browser, and an installed copy
 puts a **BorderCheck** entry in the computer's app search that does the same:
 

@@ -137,7 +137,7 @@ func IgnorableItems(ctx context.Context, p policy.Policy) (items []Item, home st
 		return nil, "", err
 	}
 	if c.Secrets.IsEnabled() {
-		_, found, bundles, _, err := scanSecrets(ctx, c.Secrets)
+		_, found, bundles, _, _, err := scanSecrets(ctx, c.Secrets)
 		if err != nil {
 			return nil, "", err
 		}

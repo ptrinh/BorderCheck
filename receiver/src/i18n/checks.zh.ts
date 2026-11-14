@@ -140,9 +140,13 @@ export const checksZh: CheckCatalog = {
   "docker.fix":
     "只在 localhost 上发布端口（[code]-p 127.0.0.1:5432:5432[/code]）。不要使用 [code]--network host[/code] 或 [code]--privileged[/code]。只挂载项目文件夹，切勿挂载 Docker socket、主目录或凭据文件夹。",
 
-  "secrets.pass": "Shell 配置文件、Shell 历史、凭据文件和 .env 文件中都没有明文密钥。",
+  "secrets.pass": "Shell 配置文件、Shell 历史、凭据文件、.env 文件、AI 提示和近期 AI 聊天记录中都没有明文密钥。",
+  "secrets.passOutsideChats": "Shell 配置文件、Shell 历史、凭据文件和 .env 文件中都没有明文密钥。",
+  "secrets.chatInfo": "供参考：AI 提示或近期 AI 聊天记录中有 {n} 个密钥（{files} 个文件）。运行 [code]bordercheck chats[/code] 检查全部聊天记录，并查看如何删除。",
   "secrets.found": "{files} 个文件中共有 {n} 个明文密钥。",
   "secrets.foundProd": "{files} 个文件中共有 {n} 个明文密钥，其中 {prod} 个标记为生产环境。",
+  "secrets.chatGuard": "如需今后让密钥远离 Claude Code（拦截含有密钥的提示、拒绝会打印密钥的命令、隐藏命令输出中的密钥），请运行 [code]bordercheck guard install[/code]。",
+  "secrets.chatsPartial": "AI 聊天记录超过了策略的上限（checks.secrets.ai_chat_max_mb），因此只读取了最新的部分。",
   "secrets.incomplete": "扫描达到时间上限，部分文件夹未检查。",
   "ignore.more": "另有 {n} 项已被你忽略。",
   "ignore.all": "发现的只有你标记为不敏感的 {n} 项。",
@@ -155,6 +159,7 @@ export const checksZh: CheckCatalog = {
   "secrets.fix.linux":
     "把每个密钥移入桌面密钥环（libsecret 的 [code]secret-tool store[/code] / [code]secret-tool lookup[/code]）或密码管理器的命令行工具（如 pass 或 1Password [code]op run[/code]），然后删除那一行或那个文件。",
   "secrets.fix.other": "把每个密钥移入密码管理器或系统密钥环，然后删除那一行或那个文件。",
+  "secrets.fix.aiChat": "如果密钥出现在 AI 助手的聊天记录中，请删除该对话：所列文件就包含它（Claude Code 将每个对话保存为 [code]~/.claude/projects[/code] 下的 .jsonl 文件，Codex 保存在 [code]~/.codex/sessions[/code] 下；Gemini CLI、Copilot、Cursor 的 agent、Cline 和 Aider 也都将每个对话或会话保存为一个文件）。提示历史（[code]~/.claude/history.jsonl[/code]、[code]~/.codex/history.jsonl[/code]、[code].aider.input.history[/code]：输入过的内容）中的提示是其中的一条：删除那一条即可。这样会删除本机上的副本；密钥也已发送给该助手的提供商。Claude Code 会删除早于 [code]cleanupPeriodDays[/code]（默认 30 天，在 [code]~/.claude/settings.json[/code] 中设置）的对话；设置得更短，本机保留的对话就更少。",
   "secrets.fix.rotate": 
     "对于出现在 Shell 历史中的密钥，删除相应的行即可。只有在有证据表明这台电脑已被入侵时，才需要轮换密钥。",
 

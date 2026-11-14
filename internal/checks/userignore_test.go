@@ -136,6 +136,8 @@ func setHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // AI chat history is read from the test home only
+	t.Setenv("CODEX_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	return home
 }

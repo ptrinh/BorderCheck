@@ -197,6 +197,12 @@ type Secrets struct {
 	// SampleRules are the rules that set a finding aside as a likely sample
 	// key (see SampleRuleNames); [] turns that off.
 	SampleRules []string `json:"sample_rules"`
+	// AIChatHours: with locations.ai_chats, read the conversations changed in
+	// this many hours, newest first, at most AIChatMaxMB megabytes in all.
+	// What is found there is for information only; `bordercheck chats` reads
+	// the whole history.
+	AIChatHours int `json:"ai_chat_hours"`
+	AIChatMaxMB int `json:"ai_chat_max_mb"`
 }
 
 // SecretLocations switches each well-known credential store on or off.
@@ -213,6 +219,7 @@ type SecretLocations struct {
 	PgPass         bool `json:"pgpass"`          // ~/.pgpass
 	MySQL          bool `json:"mysql"`           // ~/.my.cnf
 	GitRemotes     bool `json:"git_remotes"`     // tokens in git remote URLs (.git/config of repositories the walk finds, ~/.gitconfig)
+	AIChats        bool `json:"ai_chats"`        // AI assistants' conversation history (Claude Code, Codex CLI); see ai_chat_hours
 }
 
 // SSHKeys judges the SSH keys in ~/.ssh and those named by ~/.ssh/config.
@@ -423,9 +430,11 @@ func Default() Policy {
 				ShowTail:           ptr(true),
 				WalkDepth:          5,
 				Locations: SecretLocations{Docker: true, Kube: true, Netrc: true, GitCredentials: true, GCloud: true,
-					Azure: true, PyPI: true, GitHubCLI: true, Terraform: true, PgPass: true, MySQL: true, GitRemotes: true},
+					Azure: true, PyPI: true, GitHubCLI: true, Terraform: true, PgPass: true, MySQL: true, GitRemotes: true, AIChats: true},
 				UserIgnore:  true,
 				SampleRules: slices.Clone(SampleRuleNames),
+				AIChatHours: 48,
+				AIChatMaxMB: 256,
 			},
 			OSUpdates: OSUpdates{
 				MinOSVersions:     map[string]string{"macos": "15", "windows": "19045", "ubuntu": "22.04", "debian": "12", "fedora": "43"},
@@ -593,6 +602,12 @@ func (p Policy) validate() error {
 	}
 	if s.WalkDepth < 0 || s.WalkDepth > 20 {
 		return errors.New("checks.secrets.walk_depth must be between 0 and 20")
+	}
+	if s.AIChatHours < 0 || s.AIChatHours > 8760 {
+		return errors.New("checks.secrets.ai_chat_hours must be between 0 and 8760")
+	}
+	if s.AIChatMaxMB < 0 || s.AIChatMaxMB > 4096 {
+		return errors.New("checks.secrets.ai_chat_max_mb must be between 0 and 4096")
 	}
 	for _, g := range s.IgnorePaths {
 		if _, err := Glob(g); err != nil {

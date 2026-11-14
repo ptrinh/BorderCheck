@@ -173,11 +173,20 @@ var Catalog = map[string]Entry{
 		"socket, your home folder or credential folders."),
 
 	// ---- secrets ----
-	"secrets.pass":  s("No plain-text secrets in shell files, shell history, credential files or .env files."),
+	"secrets.pass":             s("No plain-text secrets in shell files, shell history, credential files, .env files, AI prompts or recent AI chat history."),
+	"secrets.passOutsideChats": s("No plain-text secrets in shell files, shell history, credential files or .env files."),
+	"secrets.chatInfo": pl("For information: 1 secret in AI prompts or recent AI chat history ({files} file(s)). "+
+		"Run [code]bordercheck chats[/code] to check all of the history and see how to remove them.",
+		"For information: {n} secrets in AI prompts or recent AI chat history ({files} file(s)). "+
+			"Run [code]bordercheck chats[/code] to check all of the history and see how to remove them."),
 	"secrets.found": pl("1 secret in plain text across {files} file(s).", "{n} secrets in plain text across {files} file(s)."),
 	"secrets.foundProd": pl("1 secret in plain text across {files} file(s), {prod} marked production.",
 		"{n} secrets in plain text across {files} file(s), {prod} marked production."),
 	"secrets.incomplete": s("The scan hit its time limit, so some folders were not checked."),
+	"secrets.chatGuard": s("To keep secrets out of Claude Code from now on (stop prompts that hold one, refuse " +
+		"commands that print them, hide them in commands' output), run [code]bordercheck guard install[/code]."),
+	"secrets.chatsPartial": s("AI chat history is larger than the policy's limit (checks.secrets.ai_chat_max_mb), " +
+		"so only its newest part was read."),
 	"secrets.fix.mac": s("Move each key into the Keychain behind Touch ID with touchenv " +
 		"(https://github.com/ptrinh/touch-env): [code]touchenv set NAME[/code], then delete the line or file."),
 	"secrets.fix.win": s("Move each key into Windows Credential Manager or a password manager CLI (e.g. 1Password " +
@@ -188,6 +197,15 @@ var Catalog = map[string]Entry{
 	"secrets.fix.other": s("Move each key into a password manager or the OS keyring, then delete the line or file."),
 	"secrets.fix.rotate": s("For a key in shell history, deleting those lines is enough. Rotate a key only if there is " +
 		"evidence that this computer was compromised."),
+	"secrets.fix.aiChat": s("For a key in an AI assistant's chat history, delete that conversation: the file listed " +
+		"holds it (Claude Code keeps each one as a .jsonl file under [code]~/.claude/projects[/code], Codex under " +
+		"[code]~/.codex/sessions[/code]; Gemini CLI, Copilot, Cursor's agent, Cline and Aider likewise keep one file " +
+		"per conversation or session). " +
+		"A prompt in a prompt history ([code]~/.claude/history.jsonl[/code], [code]~/.codex/history.jsonl[/code], " +
+		"[code].aider.input.history[/code]: what was typed) is one entry there: delete that entry. " +
+		"That removes the copy on this computer; the key was also sent to the assistant's provider. Claude Code " +
+		"deletes conversations older than [code]cleanupPeriodDays[/code] (30 by default, in " +
+		"[code]~/.claude/settings.json[/code]); a shorter period keeps fewer of them on disk."),
 
 	// ---- os-updates: problems ----
 	"updates.belowMin":           s("{os} is older than the minimum version {min} set by policy."),

@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,12 +17,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ptrinh/bordercheck/internal/agent"
 	"github.com/ptrinh/bordercheck/internal/check"
 	"github.com/ptrinh/bordercheck/internal/checks"
+	"github.com/ptrinh/bordercheck/internal/guard"
 	"github.com/ptrinh/bordercheck/internal/policy"
 	"github.com/ptrinh/bordercheck/internal/report"
 )
@@ -71,6 +74,10 @@ Everyday
   bordercheck open               open your report page in the browser (also: "BorderCheck" in Spotlight,
                                  the Start menu or your desktop's application menu)
   bordercheck fix                what to fix and how, written for an AI coding assistant to follow with you
+  bordercheck chats              secrets in your AI assistants' chat history (Claude Code, Codex, Gemini CLI,
+                                 Copilot, Cursor's agent, Cline, Aider), all of it
+  bordercheck guard install      keep secrets out of Claude Code: stop prompts that hold one, refuse commands
+                                 that print them, hide them in commands' output (bordercheck guard: status)
   bordercheck send -force        check now and send a fresh report to your organisation
   bordercheck update             get the newest policy and the newest version now
   bordercheck notifications      macOS: let BorderCheck show notifications under its own name
@@ -120,6 +127,10 @@ func run(args []string) int {
 			return runAgent(args[0], args[1:])
 		case "fix":
 			return runFix(args[1:])
+		case "chats":
+			return runChats(args[1:])
+		case "guard":
+			return runGuard(args[1:])
 		case "ignore", "unignore":
 			return runIgnoreCommand(args[0], args[1:])
 		case "verify":
@@ -270,6 +281,303 @@ func runFix(args []string) int {
 
 // loadPolicy finds the policy: the flag, then $BORDERCHECK_POLICY, then
 // policies.json beside the binary, else the built-in one.
+// runChats lists the secrets in AI assistants' chat history, all of it unless
+// -hours says otherwise, by file and line, never the values. The secrets
+// check reads only the last ai_chat_hours of it and points here. It only reads.
+// Exit status 1 when something is found.
+func runChats(args []string) int {
+	fs := flag.NewFlagSet("bordercheck chats", flag.ContinueOnError)
+	policyPath := fs.String("policy", "", "policy JSON file")
+	hours := fs.Int("hours", 0, "only conversations changed in this many hours (0: all)")
+	jsonOut := fs.Bool("json", false, "print the findings as JSON (never the values)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		return fail(fmt.Errorf("chats: unexpected argument %q", fs.Arg(0)))
+	}
+	if *hours < 0 {
+		return fail(errors.New("chats: -hours must not be negative"))
+	}
+	pol, err := loadPolicy(*policyPath)
+	if err != nil {
+		return fail(err)
+	}
+	var since time.Time
+	what := "all of the AI chat history"
+	if *hours > 0 {
+		since = time.Now().Add(-time.Duration(*hours) * time.Hour)
+		what = fmt.Sprintf("AI chat history from the last %d hours", *hours)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if isTerminal(os.Stderr) && !*jsonOut {
+		fmt.Fprintf(os.Stderr, "Reading %s (Claude Code, Codex, Gemini CLI, Copilot, Cursor's agent, Cline, Aider)…\n", what)
+	}
+	found, err := checks.ScanAIChats(ctx, pol.Checks.Secrets, since)
+	if err != nil {
+		return fail(err)
+	}
+	home, _ := os.UserHomeDir()
+	code := writeChats(os.Stdout, found, *hours, what, home, *jsonOut)
+	settings := guard.SettingsPath(home)
+	if _, err := os.Stat(filepath.Dir(settings)); code == 1 && !*jsonOut && err == nil && len(guard.Installed(settings)) < len(guard.Hooks) {
+		fmt.Println("\nTo keep secrets out of Claude Code from now on (stop prompts that hold one, refuse commands that print them,\n" +
+			"hide them in commands' output), run: bordercheck guard install")
+	}
+	return code
+}
+
+// runGuard is `bordercheck guard`: install, uninstall or show the Claude Code
+// hooks (guard.Hooks); `guard prompt`, `guard command` and `guard output`
+// are the hooks themselves.
+func runGuard(args []string) int {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fail(err)
+	}
+	path := guard.SettingsPath(home)
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "prompt":
+		return guardPrompt(os.Stdin, os.Stderr)
+	case "command":
+		return guardCommand(os.Stdin, os.Stderr)
+	case "output":
+		return guardOutput(os.Stdin, os.Stdout)
+	case "install":
+		bin, err := guardBinary()
+		if err != nil {
+			return fail(err)
+		}
+		changed, err := guard.Install(path, bin)
+		if err != nil {
+			return fail(err)
+		}
+		if changed {
+			fmt.Printf("Added BorderCheck's hooks to %s. In Claude Code sessions started from now on:\n", tildePath(home, path))
+		} else {
+			fmt.Printf("BorderCheck's hooks are already in %s. In Claude Code:\n", tildePath(home, path))
+		}
+		fmt.Println("  - a prompt that holds a secret is stopped before it is sent, and you are told which (#allow-secret lets it through)\n" +
+			"  - a command that prints secrets wholesale (env, cat .env, touchenv get…) is refused, with what to do instead\n" +
+			"  - secrets in a command's output are replaced with ***REDACTED*** before the model sees them\n" +
+			"Not covered: files the assistant reads or edits with its own tools (they must reach it as they are), and\n" +
+			"what is already on disk: Claude Code's history keeps a stopped prompt and a command's original output;\n" +
+			"bordercheck chats finds those. /hooks in Claude Code lists the hooks; bordercheck guard uninstall removes them.")
+		return 0
+	case "uninstall":
+		changed, err := guard.Uninstall(path, "")
+		if err != nil {
+			return fail(err)
+		}
+		if changed {
+			fmt.Printf("Removed BorderCheck's hooks from %s.\n", tildePath(home, path))
+		} else {
+			fmt.Println("BorderCheck's hooks are not set up; nothing to remove.")
+		}
+		return 0
+	case "", "status":
+		on := guard.Installed(path)
+		if len(on) == 0 {
+			fmt.Println("Off. bordercheck guard install makes Claude Code stop prompts that hold a secret, refuse commands\n" +
+				"that print secrets, and hide secrets in commands' output.")
+			return 0
+		}
+		fmt.Printf("In %s:\n", tildePath(home, path))
+		for _, h := range guard.Hooks {
+			state := "off"
+			if on[h.Sub] {
+				state = "on"
+			}
+			fmt.Printf("  %-8s %s (%s)\n", h.Sub, state, map[string]string{
+				"prompt": "stops a prompt that holds a secret", "command": "refuses commands that print secrets",
+				"output": "hides secrets in commands' output"}[h.Sub])
+		}
+		if len(on) < len(guard.Hooks) {
+			fmt.Println("bordercheck guard install sets up the rest.")
+		}
+		return 0
+	}
+	return fail(fmt.Errorf("guard: unknown command %q; use install, uninstall or status", sub))
+}
+
+// guardBinary is the program the hook runs: the installed copy when there is
+// one (it updates itself and stays where it is), else this one.
+func guardBinary() (string, error) {
+	if dir, err := agent.Dir(); err == nil {
+		bin := filepath.Join(dir, map[bool]string{true: "bordercheck.exe", false: "bordercheck"}[runtime.GOOS == "windows"])
+		if _, err := os.Stat(filepath.Join(dir, "config.json")); err == nil {
+			if _, err := os.Stat(bin); err == nil {
+				return bin, nil
+			}
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(exe)
+}
+
+// guardPrompt is the hook: Claude Code passes the prompt as JSON on stdin; a
+// prompt holding a secret is refused with exit status 2 and the reason on
+// stderr, which Claude Code shows. Anything going wrong lets the prompt
+// through (status 0): a broken guard must not stop anyone from working.
+func guardPrompt(in io.Reader, errOut io.Writer) int {
+	var ev struct {
+		Prompt string `json:"prompt"`
+	}
+	data, err := io.ReadAll(io.LimitReader(in, 8<<20))
+	if err != nil || json.Unmarshal(data, &ev) != nil || ev.Prompt == "" || strings.Contains(ev.Prompt, guard.Allow) {
+		return 0
+	}
+	pol, err := loadPolicy("")
+	if err != nil {
+		pol = policy.Default()
+	}
+	items, err := checks.SecretsInText(pol.Checks.Secrets, []byte(ev.Prompt))
+	if err != nil || len(items) == 0 {
+		return 0
+	}
+	fmt.Fprintln(errOut, guard.Reason(items))
+	return 2
+}
+
+// guardCommand is the PreToolUse hook on Bash: a command that would print
+// secrets wholesale (guard.Risky) is refused with exit status 2 and the
+// reason on stderr, which Claude Code gives the assistant. Anything it cannot
+// read goes ahead.
+func guardCommand(in io.Reader, errOut io.Writer) int {
+	var ev struct {
+		ToolInput struct {
+			Command string `json:"command"`
+		} `json:"tool_input"`
+	}
+	data, err := io.ReadAll(io.LimitReader(in, 8<<20))
+	if err != nil || json.Unmarshal(data, &ev) != nil {
+		return 0
+	}
+	if why, bad := guard.Risky(ev.ToolInput.Command); bad {
+		fmt.Fprintln(errOut, why)
+		return 2
+	}
+	return 0
+}
+
+// guardOutput is the PostToolUse hook on Bash: secrets in the command's
+// stdout and stderr are replaced with ***REDACTED*** in what the model sees
+// (updatedToolOutput, the same object with those two fields changed). The
+// other fields are passed on as they are. Anything it cannot read, or a
+// command whose output holds no secret, is left alone (no output).
+func guardOutput(in io.Reader, out io.Writer) int {
+	var ev struct {
+		ToolResponse json.RawMessage `json:"tool_response"`
+	}
+	data, err := io.ReadAll(io.LimitReader(in, 64<<20))
+	if err != nil || json.Unmarshal(data, &ev) != nil || len(ev.ToolResponse) == 0 {
+		return 0
+	}
+	pol, err := loadPolicy("")
+	if err != nil {
+		pol = policy.Default()
+	}
+	var items []string
+	redact := func(s string) string {
+		r, found, err := checks.Redact(pol.Checks.Secrets, s)
+		if err != nil {
+			return s
+		}
+		items = append(items, found...)
+		return r
+	}
+	var updated any
+	var asString string
+	if json.Unmarshal(ev.ToolResponse, &asString) == nil {
+		updated = redact(asString)
+	} else {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(ev.ToolResponse, &obj) != nil {
+			return 0
+		}
+		for _, k := range []string{"stdout", "stderr"} {
+			var v string
+			if raw, ok := obj[k]; ok && json.Unmarshal(raw, &v) == nil {
+				if r := redact(v); r != v {
+					obj[k], _ = json.Marshal(r)
+				}
+			}
+		}
+		updated = obj
+	}
+	if len(items) == 0 {
+		return 0
+	}
+	reply := map[string]any{"hookSpecificOutput": map[string]any{
+		"hookEventName":     "PostToolUse",
+		"updatedToolOutput": updated,
+		"additionalContext": "BorderCheck replaced " + strconv.Itoa(len(items)) + " secret(s) in this output with ***REDACTED*** (" +
+			strings.Join(items, "; ") + "). The real values are unchanged wherever they came from; do not write ***REDACTED*** back anywhere.",
+	}}
+	if err := json.NewEncoder(out).Encode(reply); err != nil {
+		return 0
+	}
+	return 0
+}
+
+func tildePath(home, p string) string {
+	if rest, ok := strings.CutPrefix(p, home); ok && home != "" {
+		return "~" + rest
+	}
+	return p
+}
+
+// writeChats prints what bordercheck chats found, as text or JSON, and
+// returns the exit status: 1 when anything was found.
+func writeChats(w io.Writer, found []checks.ChatFinding, hours int, what, home string, asJSON bool) int {
+	if asJSON {
+		type item struct {
+			checks.ChatFinding
+			App     string `json:"app"`
+			Explain string `json:"explain"`
+		}
+		out := struct {
+			Hours    int    `json:"hours"` // 0: all of the history
+			Findings []item `json:"findings"`
+			Fix      string `json:"fix,omitempty"`
+		}{Hours: hours, Findings: []item{}}
+		for _, f := range found {
+			out.Findings = append(out.Findings, item{f, f.App(), f.Explain(home)})
+		}
+		if len(found) > 0 {
+			out.Fix = checks.ChatFix()
+		}
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(out); err != nil {
+			return fail(err)
+		}
+		return min(len(found), 1)
+	}
+	if len(found) == 0 {
+		fmt.Fprintf(w, "No secrets found in %s.\n", what)
+		return 0
+	}
+	files := map[string]bool{}
+	for _, f := range found {
+		files[f.Path] = true
+	}
+	fmt.Fprintf(w, "%d secret(s) in %d conversation(s), in %s, newest first. Values are not shown.\n", len(found), len(files), what)
+	for i, f := range found {
+		fmt.Fprintf(w, "\n%3d. %s\n     Where: %s\n     What:  %s\n", i+1, f.Item(), f.Where(), f.Explain(home))
+	}
+	fmt.Fprintf(w, "\n%s\n", checks.ChatFix())
+	return 1
+}
+
 func loadPolicy(path string) (policy.Policy, error) {
 	for _, p := range []string{path, os.Getenv("BORDERCHECK_POLICY"), policy.NextToBinary()} {
 		if p != "" {

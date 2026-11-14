@@ -19,6 +19,8 @@ func TestReportCarriesLikelySamplesWithoutEvidence(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // AI chat history is read from the test home only
+	t.Setenv("CODEX_HOME", "")
 	for rel, body := range map[string]string{
 		"app/.env":           "API_TOKEN=Zk3nW8sQe4yU\n",
 		"demo-apps/web/.env": "SESSION_SECRET=Xq7rT2mVb9pL\n",

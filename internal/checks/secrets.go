@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ptrinh/bordercheck/internal/check"
+	"github.com/ptrinh/bordercheck/internal/guard"
 	"github.com/ptrinh/bordercheck/internal/msg"
 	"github.com/ptrinh/bordercheck/internal/policy"
 )
@@ -87,7 +88,9 @@ type secretFinding struct {
 	name   string
 	prod   bool
 	tail   string
-	severe bool // the rule itself is high severity, e.g. a private key
+	severe bool        // the rule itself is high severity, e.g. a private key
+	chat   bool        // in an AI assistant's conversation history (secrets_aichats.go)
+	ctx    chatContext // where in that conversation; for bordercheck chats only
 }
 
 func (f secretFinding) high() bool { return f.prod || f.severe }
@@ -118,6 +121,7 @@ type secretScanner struct {
 	ignore   []*regexp.Regexp
 	extra    []string
 	gitCfgs  []string // .git/config of repositories the walk passed; see secrets_gitremotes.go
+	aider    []string // Aider's chat and input histories the walk passed; see secrets_aichats.go
 }
 
 func newSecretScanner(p policy.Secrets, home string) (*secretScanner, error) {
@@ -153,25 +157,26 @@ func newSecretScanner(p policy.Secrets, home string) (*secretScanner, error) {
 
 func secrets(p policy.Secrets, local Local) func(context.Context) check.Result {
 	return func(ctx context.Context) check.Result {
-		home, found, bundles, incomplete, err := scanSecrets(ctx, p)
+		home, found, bundles, incomplete, chats, err := scanSecrets(ctx, p)
 		if err != nil {
 			return check.Errored(err)
 		}
 		u := newUserIgnore("secrets", local, p.UserIgnore, home)
 		sc := newSampleClassifier(ctx, p, home)
-		return evalSecretsSamples(found, bundles, incomplete, secretFix(), u, sc)
+		return evalSecretsSamples(found, bundles, incomplete, chats, secretFix(), u, sc)
 	}
 }
 
 // scanSecrets finds what the policy looks for: findings and certificate
 // bundles, by the path the report shows.
-func scanSecrets(ctx context.Context, p policy.Secrets) (home string, found []secretFinding, bundles []string, incomplete bool, err error) {
+// chats says how the AI chat history scan went (see chatState).
+func scanSecrets(ctx context.Context, p policy.Secrets) (home string, found []secretFinding, bundles []string, incomplete bool, chats chatState, err error) {
 	if home, err = os.UserHomeDir(); err != nil {
-		return "", nil, nil, false, err
+		return "", nil, nil, false, chatState{}, err
 	}
 	s, err := newSecretScanner(p, home)
 	if err != nil {
-		return "", nil, nil, false, err
+		return "", nil, nil, false, chatState{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, secretScanTimeout)
 	defer cancel()
@@ -183,12 +188,27 @@ func scanSecrets(ctx context.Context, p policy.Secrets) (home string, found []se
 	}
 	found = append(found, s.scanLocations(home, runtime.GOOS, p.Locations)...)
 	found = append(found, s.scanGitRemotes(home, p.Locations)...)
+	if p.Locations.AIChats && p.AIChatHours > 0 {
+		since := time.Now().Add(-time.Duration(p.AIChatHours) * time.Hour)
+		inChats, partial := s.scanChats(ctx, home, since, int64(p.AIChatMaxMB)<<20, s.ignored)
+		found = append(found, inChats...)
+		chats.partial = partial
+		if ctx.Err() != nil {
+			incomplete, chats.partial = true, false // the time limit, not the size limit, stopped it
+		}
+		// Found something in Claude Code's history and the guard is not all on: say how to turn it on.
+		if len(inChats) > 0 && len(guard.Installed(guard.SettingsPath(home))) < len(guard.Hooks) {
+			if _, err := os.Stat(filepath.Dir(guard.SettingsPath(home))); err == nil {
+				chats.unguarded = true
+			}
+		}
+	}
 	for _, b := range bs {
 		if shown := tildePath(home, b); !s.ignored(shown) {
 			bundles = append(bundles, shown)
 		}
 	}
-	return home, found, bundles, incomplete, nil
+	return home, found, bundles, incomplete, chats, nil
 }
 
 func (s *secretScanner) ignored(shown string) bool {
@@ -258,6 +278,10 @@ func (s *secretScanner) find(ctx context.Context, home string) (scan, bundles []
 			return nil
 		}
 		if !d.Type().IsRegular() {
+			return nil
+		}
+		if name == aiderChat || name == aiderInput {
+			s.aider = append(s.aider, p)
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(name)) {
@@ -376,28 +400,59 @@ func evalSecrets(found []secretFinding, bundles []string, incomplete bool, fix m
 }
 
 func evalSecretsWith(found []secretFinding, bundles []string, incomplete bool, fix msg.Text, u *userIgnore) check.Result {
-	return evalSecretsSamples(found, bundles, incomplete, fix, u, nil)
+	return evalSecretsSamples(found, bundles, incomplete, chatState{}, fix, u, nil)
 }
 
 // evalSecretsSamples sets aside what the person ignored, then likely samples
 // (sc; nil = none), and judges the rest.
-func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool, fix msg.Text, u *userIgnore, sc *sampleClassifier) check.Result {
+func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool, cs chatState, fix msg.Text, u *userIgnore, sc *sampleClassifier) check.Result {
 	// A finding marked production can be set aside too; the list IT gets says it was.
 	found = slices.DeleteFunc(slices.Clone(found), func(f secretFinding) bool {
 		return u.take(f.path, nonEmpty(f.name), f.kind, shownKind(f.kind, f.prod))
 	})
 	bundles = slices.DeleteFunc(slices.Clone(bundles), func(b string) bool { return u.take(b, nil, bundleKind, bundleKind) })
 	found, bundles = sc.setAside(found, bundles)
+	// What was found in AI chat history is information: it is named in the
+	// summary and the evidence, and does not count toward the check.
+	var chats []secretFinding
+	found = slices.DeleteFunc(found, func(f secretFinding) bool {
+		if f.chat {
+			chats = append(chats, f)
+		}
+		return f.chat
+	})
 	var note msg.Text
 	if incomplete {
 		note = msg.Of("secrets.incomplete")
 	}
+	if len(chats) > 0 {
+		chatFiles := map[string]bool{}
+		for _, f := range chats {
+			chatFiles[f.path] = true
+		}
+		info := msg.Of("secrets.chatInfo", "n", len(chats), "files", len(chatFiles))
+		if cs.unguarded {
+			info = append(info, msg.P("secrets.chatGuard"))
+		}
+		note = append(info, note...)
+	}
+	if cs.partial {
+		note = append(note, msg.P("secrets.chatsPartial"))
+	}
+	var chatEv []string
+	for _, f := range chats {
+		chatEv = append(chatEv, f.String()+"  [AI chat, information]")
+	}
 	if len(found)+len(bundles) == 0 {
 		head, keep := msg.Of("secrets.pass"), note
+		if len(chats) > 0 {
+			head = msg.Of("secrets.passOutsideChats")
+		}
 		if sn := sc.note(); sn != nil {
 			head, keep = msg.Of("samples.all", "n", len(sc.found)), append(sn, note...)
 		}
-		return sc.finish(u.finish(check.Result{Status: check.Pass}.WithSummary(append(head, note...)), keep))
+		r := check.Result{Status: check.Pass, Evidence: capEvidence(chatEv)}.WithSummary(append(head, note...))
+		return sc.finish(u.finish(r, keep))
 	}
 	note = append(sc.note(), note...)
 	sort.SliceStable(found, func(i, j int) bool { return found[i].high() && !found[j].high() })
@@ -415,9 +470,7 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 		files[b] = true
 		ev = append(ev, b+"  "+bundleKind+" (may hold a private key)")
 	}
-	if len(ev) > secretMaxEvidence {
-		ev = append(ev[:secretMaxEvidence], fmt.Sprintf("… and %d more", len(ev)-secretMaxEvidence))
-	}
+	ev = capEvidence(append(ev, chatEv...))
 	summary := msg.Of("secrets.found", "n", len(found)+len(bundles), "files", len(files))
 	if prod > 0 {
 		summary = msg.Of("secrets.foundProd", "n", len(found)+len(bundles), "files", len(files), "prod", prod)
@@ -428,6 +481,19 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 		r.Status, r.Severity = check.Fail, check.High
 	}
 	return sc.finish(u.finish(r, nil))
+}
+
+// chatState is how the scan of AI chat history went.
+type chatState struct {
+	partial   bool // larger than the policy's limit: only the newest part was read
+	unguarded bool // Claude Code is used here without bordercheck guard
+}
+
+func capEvidence(ev []string) []string {
+	if len(ev) > secretMaxEvidence {
+		return append(ev[:secretMaxEvidence:secretMaxEvidence], fmt.Sprintf("… and %d more", len(ev)-secretMaxEvidence))
+	}
+	return ev
 }
 
 func tildePath(home, p string) string {

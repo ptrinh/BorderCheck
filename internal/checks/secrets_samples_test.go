@@ -90,7 +90,7 @@ func TestEvalSecretsSamples(t *testing.T) {
 	}
 	bundles := []string{"~/tizen-studio/tools/certificate-generator/certificates/distributor/tizen-distributor-signer.p12"}
 	c := classifier(t, "/home/an")
-	r := evalSecretsSamples(found, bundles, false, nil, nil, c)
+	r := evalSecretsSamples(found, bundles, false, chatState{}, nil, nil, c)
 	// Left: the GitHub token (sample-dir alone never sets a provider token
 	// aside), the production key, the OpenAI key.
 	if r.Status != check.Fail || len(r.Evidence) != 3 || !strings.Contains(r.Summary, "3 secrets") ||
@@ -115,7 +115,7 @@ func TestEvalSecretsSamples(t *testing.T) {
 	}
 
 	// Only samples: the check passes and says so.
-	r = evalSecretsSamples(found[:1], bundles, true, nil, nil, classifier(t, "/home/an"))
+	r = evalSecretsSamples(found[:1], bundles, true, chatState{}, nil, nil, classifier(t, "/home/an"))
 	if r.Status != check.Pass || r.Severity != "" || len(r.LikelySamples) != 2 || r.Fix != "" ||
 		r.Summary != "The only findings are 2 that look like sample keys, not real ones. The scan hit its time limit, so some folders were not checked." {
 		t.Errorf("all samples: %s %q", r.Status, r.Summary)
@@ -125,12 +125,12 @@ func TestEvalSecretsSamples(t *testing.T) {
 	}
 
 	// Off: nothing set aside, no field.
-	r = evalSecretsSamples(found, bundles, false, nil, nil, newSampleClassifier(context.Background(), samplePolicy(), "/home/an"))
+	r = evalSecretsSamples(found, bundles, false, chatState{}, nil, nil, newSampleClassifier(context.Background(), samplePolicy(), "/home/an"))
 	if len(r.LikelySamples) != 0 || len(r.Evidence) != 5 || strings.Contains(r.Summary, "sample") {
 		t.Errorf("off: %q %+v", r.Summary, r.LikelySamples)
 	}
 	// Only some rules on.
-	r = evalSecretsSamples(found, bundles, false, nil, nil, classifier(t, "/home/an", "sdk"))
+	r = evalSecretsSamples(found, bundles, false, chatState{}, nil, nil, classifier(t, "/home/an", "sdk"))
 	if len(r.LikelySamples) != 1 || r.LikelySamples[0].Rule != "sdk" {
 		t.Errorf("sdk only: %+v", r.LikelySamples)
 	}
@@ -143,7 +143,7 @@ func TestSamplesAndUserIgnore(t *testing.T) {
 	}
 	// The user's entry wins: the finding stays in the user's list, not in the samples.
 	u := newUserIgnore("secrets", Local{Ignored: []ignore.Entry{{Check: "secrets", Path: "~/demo/.env", Name: "A_SECRET", Reason: "mine"}}}, true, "/home/an")
-	r := evalSecretsSamples(found, nil, false, nil, u, classifier(t, "/home/an"))
+	r := evalSecretsSamples(found, nil, false, chatState{}, nil, u, classifier(t, "/home/an"))
 	if r.Status != check.Pass || len(r.UserIgnored) != 1 || r.UserIgnored[0].Name != "A_SECRET" ||
 		len(r.LikelySamples) != 1 || r.LikelySamples[0].Name != "B_SECRET" {
 		t.Errorf("both: %s %+v %+v", r.Status, r.UserIgnored, r.LikelySamples)
@@ -158,7 +158,7 @@ func TestSamplesCapped(t *testing.T) {
 	for i := range maxSamplesListed + 50 {
 		found = append(found, secretFinding{path: "~/examples/.env", line: i + 1, kind: "Secret-looking variable", name: "K_SECRET"})
 	}
-	r := evalSecretsSamples(found, nil, false, nil, nil, classifier(t, "/home/an"))
+	r := evalSecretsSamples(found, nil, false, chatState{}, nil, nil, classifier(t, "/home/an"))
 	if len(r.LikelySamples) != maxSamplesListed || !strings.Contains(r.Summary, "250") {
 		t.Errorf("%d listed, %q", len(r.LikelySamples), r.Summary)
 	}
@@ -170,6 +170,8 @@ func TestSecretsCheckSamplesEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // AI chat history is read from the test home only
+	t.Setenv("CODEX_HOME", "")
 	pem := "-----BEGIN PRIVATE KEY-----\nMIIBVAIBADANBgkqhkiG9w0BAQEFAASCAT4wggE6AgEAAkEA\n-----END PRIVATE KEY-----\n"
 	writeRepo(t, filepath.Join(home, "forks", "app"), "sha1", 2, []idxEntry{
 		{name: "config/default.pem", content: pem},
