@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -711,7 +712,7 @@ func (f ChatFinding) App() string {
 func (f ChatFinding) Explain(home string) string {
 	parts := []string{f.App()}
 	if f.Project != "" {
-		parts = append(parts, "in "+tildePath(home, f.Project))
+		parts = append(parts, "in "+underHome(home, f.Project))
 	}
 	if !f.When.IsZero() {
 		parts = append(parts, f.When.Format("2 Jan 2006"))
@@ -782,7 +783,7 @@ type chatContext struct {
 var (
 	isoTimeRe = regexp.MustCompile(`"timestamp"\s*:\s*"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)`)
 	msTimeRe  = regexp.MustCompile(`"timestamp"\s*:\s*(\d{13})\b`)
-	folderRe  = regexp.MustCompile(`"(?:cwd|project)"\s*:\s*"([^"]{1,512})"`)
+	folderRe  = regexp.MustCompile(`"(?:cwd|project)"\s*:\s*("(?:[^"\\]|\\.){1,512}")`)
 )
 
 // chatContextAt is chatContextOf for the file shown: Aider's Markdown and
@@ -845,7 +846,7 @@ func chatContextOf(data []byte, at int) chatContext {
 		c.when = time.UnixMilli(ms).UTC()
 	}
 	if m := folderRe.FindSubmatch(line); m != nil {
-		c.project = string(m[1])
+		_ = json.Unmarshal(m[1], &c.project) // a JSON string: C:\\Users\\… on Windows
 	}
 	switch {
 	case bytes.Contains(line, []byte(`"tool_result"`)) || bytes.Contains(line, []byte(`"function_call_output"`)):
@@ -859,6 +860,19 @@ func chatContextOf(data []byte, at int) chatContext {
 		c.source = "prompt" // history.jsonl: what was typed into the prompt
 	}
 	return c
+}
+
+// underHome is p with the home folder written ~, whichever way the path was
+// written (Windows: either slash, any case).
+func underHome(home, p string) string {
+	h, q := filepath.ToSlash(home), filepath.ToSlash(p)
+	if runtime.GOOS == "windows" {
+		h, q = strings.ToLower(h), strings.ToLower(q)
+	}
+	if home != "" && (q == h || strings.HasPrefix(q, h+"/")) {
+		return "~" + p[len(home):]
+	}
+	return p
 }
 
 // urlHost is the host of a URL with a password in it (and what follows),

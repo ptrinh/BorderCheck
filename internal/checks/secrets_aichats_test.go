@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -196,7 +197,8 @@ func TestScanAIChatsReadsAllOfIt(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
-	line := `{"type":"user","cwd":"` + filepath.ToSlash(filepath.Join(home, "app")) + `","timestamp":"2026-11-03T09:15:00.000Z","message":{"content":"` + chatGH + `"}}` + "\n"
+	cwd, _ := json.Marshal(filepath.Join(home, "app")) // as the assistant writes it: C:\\Users\\… on Windows
+	line := `{"type":"user","cwd":` + string(cwd) + `,"timestamp":"2026-11-03T09:15:00.000Z","message":{"content":"` + chatGH + `"}}` + "\n"
 	writeChat(t, filepath.Join(home, ".claude", "projects", "p", "new.jsonl"), line, time.Hour)
 	writeChat(t, filepath.Join(home, ".claude", "projects", "p", "old.jsonl"), line, 400*24*time.Hour)
 	p := policy.Default().Checks.Secrets
