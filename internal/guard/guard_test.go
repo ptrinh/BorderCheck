@@ -184,6 +184,8 @@ func TestRiskyCommands(t *testing.T) {
 		"cd app && env", "export", "set", "printenv GITHUB_TOKEN", "printenv db_password",
 		"cat .env", "cat app/.env.local", "grep KEY .env", "tail -n 5 ./.env.production", `cat "$HOME/proj/.env"`,
 		"security find-generic-password -s x -w", "op read op://vault/item/password", "gh auth token", "pass show work/db",
+		"/opt/homebrew/bin/touchenv get K", `echo "$(touchenv get K)"`, "x=`printenv API_TOKEN`", "sudo cat /srv/app/.env",
+		"cd a\nenv",
 	} {
 		if why, bad := Risky(c); !bad || !strings.HasPrefix(why, "BorderCheck refused this command: ") {
 			t.Errorf("%q not refused", c)
@@ -193,6 +195,9 @@ func TestRiskyCommands(t *testing.T) {
 		"touchenv run --intent x KEY -- make deploy", "env FOO=1 go test ./...", "printenv PATH", "echo $HOME",
 		"cat .env.example", "cat README.md", "ls -la .env", "git diff .env", "sed 's/=.*//' .env", "envsubst < a > b",
 		"go test ./internal/env/...", "security find-generic-password -s x", "make set-version", "./setup.sh",
+		// The same words inside quotes are not a command.
+		"git commit -m \"1.8.1: touchenv get ends the line\n\nenv and cat .env are refused\"", `echo 'run env'`,
+		`grep -n "touchenv get" README.md`, "gh pr view 1", "op run -- make", "env > /dev/null 2>&1 && echo ok",
 	} {
 		if why, bad := Risky(c); bad {
 			t.Errorf("%q refused: %s", c, why)
