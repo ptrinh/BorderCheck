@@ -344,7 +344,12 @@
   },
   "secrets.incomplete": "The scan hit its time limit, so some folders were not checked.",
   "secrets.pass": "No plain-text secrets in shell files, shell history, credential files, .env files, AI prompts or recent AI chat history.",
+  "secrets.passExceptInfo": "No plain-text secrets that count against this computer; what is listed is for information.",
   "secrets.passOutsideChats": "No plain-text secrets in shell files, shell history, credential files or .env files.",
+  "secrets.signInInfo": {
+    "one": "For information: 1 cloud CLI sign-in is kept in plain text, as the CLI does by design; signing out removes it.",
+    "other": "For information: {n} cloud CLI sign-ins are kept in plain text, as the CLIs do by design; signing out removes them."
+  },
   "sharing.allowed": "On but allowed by policy: {services}.",
   "sharing.fix.cups": "[code]sudo cupsctl --no-share-printers[/code]",
   "sharing.fix.linuxGnome": "Settings → Sharing → File Sharing → off.",

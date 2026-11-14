@@ -143,6 +143,8 @@ export const checksVi: CheckCatalog = {
 
   "secrets.pass": "Không có secret dạng văn bản thuần trong file shell, lịch sử shell, file thông tin đăng nhập, file .env, prompt gửi AI hay lịch sử chat gần đây với AI.",
   "secrets.passOutsideChats": "Không có secret dạng văn bản thuần trong file shell, lịch sử shell, file thông tin đăng nhập hay file .env.",
+  "secrets.passExceptInfo": "Không có secret dạng văn bản thuần nào bị tính cho máy này; những mục được liệt kê chỉ để bạn biết.",
+  "secrets.signInInfo": "Để bạn biết: có {n} phiên đăng nhập của CLI cloud được lưu dạng văn bản thuần, đúng như cách CLI đó vốn làm; đăng xuất sẽ xoá chúng.",
   "secrets.chatInfo": "Để bạn biết: có {n} secret trong prompt gửi AI hoặc lịch sử chat gần đây với AI ({files} file). Chạy [code]bordercheck chats[/code] để kiểm tra toàn bộ lịch sử và xem cách xoá.",
   "secrets.found": "{n} secret dạng văn bản thuần trong {files} file.",
   "secrets.foundProd": "{n} secret dạng văn bản thuần trong {files} file, {prod} secret được đánh dấu production.",

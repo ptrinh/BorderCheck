@@ -90,6 +90,7 @@ type secretFinding struct {
 	tail   string
 	severe bool        // the rule itself is high severity, e.g. a private key
 	chat   bool        // in an AI assistant's conversation history (secrets_aichats.go)
+	signIn bool        // a cloud CLI's sign-in cache, reported for information (signInKinds)
 	ctx    chatContext // where in that conversation; for bordercheck chats only
 }
 
@@ -186,7 +187,10 @@ func scanSecrets(ctx context.Context, p policy.Secrets) (home string, found []se
 			found = append(found, s.scanFile(f, shown)...)
 		}
 	}
-	found = append(found, s.scanLocations(home, runtime.GOOS, p.Locations)...)
+	for _, f := range s.scanLocations(home, runtime.GOOS, p.Locations) {
+		f.signIn = p.CLISignInsInfo && signInKinds[f.kind]
+		found = append(found, f)
+	}
 	found = append(found, s.scanGitRemotes(home, p.Locations)...)
 	if p.Locations.AIChats && p.AIChatHours > 0 {
 		since := time.Now().Add(-time.Duration(p.AIChatHours) * time.Hour)
@@ -415,12 +419,18 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 	found, bundles = sc.setAside(found, bundles)
 	// What was found in AI chat history is information: it is named in the
 	// summary and the evidence, and does not count toward the check.
-	var chats []secretFinding
+	// So are cloud CLIs' sign-in caches (signInKinds), with how to sign out.
+	var chats, signIns []secretFinding
 	found = slices.DeleteFunc(found, func(f secretFinding) bool {
-		if f.chat {
+		switch {
+		case f.chat:
 			chats = append(chats, f)
+		case f.signIn:
+			signIns = append(signIns, f)
+		default:
+			return false
 		}
-		return f.chat
+		return true
 	})
 	var note msg.Text
 	if incomplete {
@@ -433,6 +443,17 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 		}
 		note = append(msg.Of("secrets.chatInfo", "n", len(chats), "files", len(chatFiles)), note...)
 	}
+	if len(signIns) > 0 {
+		info := msg.Of("secrets.signInInfo", "n", len(signIns))
+		seen := map[string]bool{}
+		for _, f := range signIns {
+			if key := credFix[f.kind]; key != "" && !seen[key] {
+				seen[key] = true
+				info = append(info, msg.P(key))
+			}
+		}
+		note = append(info, note...)
+	}
 	if cs.unguarded {
 		note = append(note, msg.P("secrets.chatGuard"))
 	}
@@ -440,12 +461,17 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 		note = append(note, msg.P("secrets.chatsPartial"))
 	}
 	var chatEv []string
+	for _, f := range signIns {
+		chatEv = append(chatEv, f.String()+"  [sign-in, information]")
+	}
 	for _, f := range chats {
 		chatEv = append(chatEv, f.String()+"  [AI chat, information]")
 	}
 	if len(found)+len(bundles) == 0 {
 		head, keep := msg.Of("secrets.pass"), note
-		if len(chats) > 0 {
+		if len(signIns) > 0 {
+			head = msg.Of("secrets.passExceptInfo")
+		} else if len(chats) > 0 {
 			head = msg.Of("secrets.passOutsideChats")
 		}
 		if sn := sc.note(); sn != nil {
@@ -481,6 +507,16 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 		r.Status, r.Severity = check.Fail, check.High
 	}
 	return sc.finish(u.finish(r, nil))
+}
+
+// signInKinds are the sign-in caches cloud CLIs keep in plain text by design:
+// sessions that signing out revokes. With the policy's cli_sign_ins_info they
+// are information, not a warning.
+var signInKinds = map[string]bool{
+	"Azure CLI token cache (plain text)":                      true,
+	"Azure CLI token cache (plain text, legacy)":              true,
+	"gcloud credential store (tokens in a plain SQLite file)": true,
+	"gcloud application default credentials (refresh token)":  true,
 }
 
 // credFix is the advice for a kind of finding in a credential store, which

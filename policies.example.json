@@ -114,6 +114,7 @@
       "user_ignore": true,
       "sample_rules": ["git-tracked", "sdk", "sample-dir"],
       "ai_chat_hours": 48,
+      "cli_sign_ins_info": true,
       "ai_chat_max_mb": 256
     },
     "ssh-keys": {

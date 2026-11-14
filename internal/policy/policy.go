@@ -203,6 +203,12 @@ type Secrets struct {
 	// the whole history.
 	AIChatHours int `json:"ai_chat_hours"`
 	AIChatMaxMB int `json:"ai_chat_max_mb"`
+	// CLISignInsInfo reports the sign-in caches cloud CLIs keep in plain
+	// text by design (Azure CLI's tokens, gcloud's credential store and
+	// application default credentials) for information, with how to sign
+	// out, rather than as a warning. They are refreshable sessions that
+	// signing out revokes, not long-lived keys. false: warn as before.
+	CLISignInsInfo bool `json:"cli_sign_ins_info"`
 }
 
 // SecretLocations switches each well-known credential store on or off.
@@ -431,10 +437,11 @@ func Default() Policy {
 				WalkDepth:          5,
 				Locations: SecretLocations{Docker: true, Kube: true, Netrc: true, GitCredentials: true, GCloud: true,
 					Azure: true, PyPI: true, GitHubCLI: true, Terraform: true, PgPass: true, MySQL: true, GitRemotes: true, AIChats: true},
-				UserIgnore:  true,
-				SampleRules: slices.Clone(SampleRuleNames),
-				AIChatHours: 48,
-				AIChatMaxMB: 256,
+				UserIgnore:     true,
+				SampleRules:    slices.Clone(SampleRuleNames),
+				AIChatHours:    48,
+				CLISignInsInfo: true,
+				AIChatMaxMB:    256,
 			},
 			OSUpdates: OSUpdates{
 				MinOSVersions:     map[string]string{"macos": "15", "windows": "19045", "ubuntu": "22.04", "debian": "12", "fedora": "43"},

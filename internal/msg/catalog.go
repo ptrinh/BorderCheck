@@ -175,6 +175,8 @@ var Catalog = map[string]Entry{
 	// ---- secrets ----
 	"secrets.pass":             s("No plain-text secrets in shell files, shell history, credential files, .env files, AI prompts or recent AI chat history."),
 	"secrets.passOutsideChats": s("No plain-text secrets in shell files, shell history, credential files or .env files."),
+	"secrets.passExceptInfo":   s("No plain-text secrets that count against this computer; what is listed is for information."),
+	"secrets.signInInfo":       pl("For information: 1 cloud CLI sign-in is kept in plain text, as the CLI does by design; signing out removes it.", "For information: {n} cloud CLI sign-ins are kept in plain text, as the CLIs do by design; signing out removes them."),
 	"secrets.chatInfo": pl("For information: 1 secret in AI prompts or recent AI chat history ({files} file(s)). "+
 		"Run [code]bordercheck chats[/code] to check all of the history and see how to remove them.",
 		"For information: {n} secrets in AI prompts or recent AI chat history ({files} file(s)). "+

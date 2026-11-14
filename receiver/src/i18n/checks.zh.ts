@@ -142,6 +142,8 @@ export const checksZh: CheckCatalog = {
 
   "secrets.pass": "Shell 配置文件、Shell 历史、凭据文件、.env 文件、AI 提示和近期 AI 聊天记录中都没有明文密钥。",
   "secrets.passOutsideChats": "Shell 配置文件、Shell 历史、凭据文件和 .env 文件中都没有明文密钥。",
+  "secrets.passExceptInfo": "本机没有计入的明文密钥；所列项目仅供参考。",
+  "secrets.signInInfo": "供参考：有 {n} 个云 CLI 登录会话以明文保存，这是该 CLI 的设计；退出登录即可删除。",
   "secrets.chatInfo": "供参考：AI 提示或近期 AI 聊天记录中有 {n} 个密钥（{files} 个文件）。运行 [code]bordercheck chats[/code] 检查全部聊天记录，并查看如何删除。",
   "secrets.found": "{files} 个文件中共有 {n} 个明文密钥。",
   "secrets.foundProd": "{files} 个文件中共有 {n} 个明文密钥，其中 {prod} 个标记为生产环境。",

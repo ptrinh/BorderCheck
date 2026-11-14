@@ -433,3 +433,26 @@ func TestRepeatedSecretListsEveryLine(t *testing.T) {
 		t.Errorf("no lines: %s", w)
 	}
 }
+
+func TestCloudSignInsAreInformation(t *testing.T) {
+	azure := secretFinding{path: "~/.azure/msal_token_cache.json", kind: "Azure CLI token cache (plain text)", signIn: true}
+	env := secretFinding{path: "~/app/.env", line: 1, kind: "GitHub token"}
+
+	r := evalSecrets([]secretFinding{azure}, nil, false, secretFix())
+	if r.Status != "pass" || !strings.Contains(r.Summary, "For information: 1 cloud CLI sign-in") || !strings.Contains(r.Summary, "az logout") ||
+		!strings.HasPrefix(r.Summary, "No plain-text secrets that count") {
+		t.Errorf("sign-in only: %s %q", r.Status, r.Summary)
+	}
+	if len(r.Evidence) != 1 || !strings.HasSuffix(r.Evidence[0], "[sign-in, information]") {
+		t.Errorf("evidence %q", r.Evidence)
+	}
+	r = evalSecrets([]secretFinding{azure, env}, nil, false, secretFix())
+	if r.Status != "warn" || !strings.Contains(r.Summary, "1 secret in plain text across 1 file") || strings.Contains(r.Fix, "az logout") {
+		t.Errorf("with another: %s %q %q", r.Status, r.Summary, r.Fix)
+	}
+	// Without the policy's cli_sign_ins_info the scan does not mark it: a warning, as before.
+	azure.signIn = false
+	if r := evalSecrets([]secretFinding{azure}, nil, false, secretFix()); r.Status != "warn" {
+		t.Errorf("policy off: %s", r.Status)
+	}
+}
