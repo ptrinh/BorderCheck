@@ -289,8 +289,9 @@ read its input lets everything through, so a broken guard never stops anyone fro
 entries are added or removed; the person's other settings and hooks are kept, in their order, and a settings file
 that is not valid JSON is left alone. `bordercheck guard` says which hooks are on, `bordercheck guard uninstall`
 removes them, and `bordercheck uninstall` removes them too when they run that install's program. Nothing sets them
-up on its own: the `secrets` summary and `bordercheck chats` suggest it when they find a secret in Claude Code's
-history and the hooks are not all on.
+up on its own: on a computer where Claude Code is used (`~/.claude` exists) and the hooks are not all on, the
+`secrets` summary suggests `bordercheck guard install`, found secrets or not, and so does `bordercheck chats` when it
+finds one.
 
 touchenv (1.8 or later) does the same for the secrets it hands out, with any assistant: `touchenv run` replaces their
 exact values in the command's output when an assistant runs it or the output goes to a program.

@@ -196,16 +196,17 @@ func scanSecrets(ctx context.Context, p policy.Secrets) (home string, found []se
 		if ctx.Err() != nil {
 			incomplete, chats.partial = true, false // the time limit, not the size limit, stopped it
 		}
-		// Found something in Claude Code's history and the guard is not all on: say how to turn it on.
-		if len(inChats) > 0 && len(guard.Installed(guard.SettingsPath(home))) < len(guard.Hooks) {
-			if _, err := os.Stat(filepath.Dir(guard.SettingsPath(home))); err == nil {
-				chats.unguarded = true
-			}
-		}
+
 	}
 	for _, b := range bs {
 		if shown := tildePath(home, b); !s.ignored(shown) {
 			bundles = append(bundles, shown)
+		}
+	}
+	// Claude Code is used here and the guard is not all on: say how to turn it on.
+	if settings := guard.SettingsPath(home); len(guard.Installed(settings)) < len(guard.Hooks) {
+		if _, err := os.Stat(filepath.Dir(settings)); err == nil {
+			chats.unguarded = true
 		}
 	}
 	return home, found, bundles, incomplete, chats, nil
@@ -430,11 +431,10 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 		for _, f := range chats {
 			chatFiles[f.path] = true
 		}
-		info := msg.Of("secrets.chatInfo", "n", len(chats), "files", len(chatFiles))
-		if cs.unguarded {
-			info = append(info, msg.P("secrets.chatGuard"))
-		}
-		note = append(info, note...)
+		note = append(msg.Of("secrets.chatInfo", "n", len(chats), "files", len(chatFiles)), note...)
+	}
+	if cs.unguarded {
+		note = append(note, msg.P("secrets.chatGuard"))
 	}
 	if cs.partial {
 		note = append(note, msg.P("secrets.chatsPartial"))
@@ -476,11 +476,68 @@ func evalSecretsSamples(found []secretFinding, bundles []string, incomplete bool
 		summary = msg.Of("secrets.foundProd", "n", len(found)+len(bundles), "files", len(files), "prod", prod)
 	}
 	r := check.Result{Status: check.Warn, Severity: check.Medium, Evidence: ev}.
-		WithSummary(append(summary, note...)).WithFix(fix)
+		WithSummary(append(summary, note...)).WithFix(fixFor(fix, found, bundles))
 	if high {
 		r.Status, r.Severity = check.Fail, check.High
 	}
 	return sc.finish(u.finish(r, nil))
+}
+
+// credFix is the advice for a kind of finding in a credential store, which
+// "move each key into the keychain" does not fit: the tool itself writes the
+// file, and has its own way to keep the secret elsewhere or remove it.
+var credFix = map[string]string{
+	"Azure CLI token cache (plain text)":                          "secrets.fix.azureCache",
+	"Azure CLI token cache (plain text, legacy)":                  "secrets.fix.azureLegacy",
+	"Azure service principal secret":                              "secrets.fix.azureSP",
+	"gcloud application default credentials (refresh token)":      "secrets.fix.gcloudADC",
+	"gcloud credential store (tokens in a plain SQLite file)":     "secrets.fix.gcloudStore",
+	"Google service account key":                                  "secrets.fix.gcloudKey",
+	"Docker registry login":                                       "secrets.fix.docker",
+	"Git credential (plain text)":                                 "secrets.fix.gitCreds",
+	"git credential.helper=store (saves passwords in plain text)": "secrets.fix.gitCreds",
+	"GitHub CLI token":                                            "secrets.fix.gh",
+	"Terraform API token":                                         "secrets.fix.terraform",
+	"PostgreSQL password":                                         "secrets.fix.pgpass",
+	"PyPI password":                                               "secrets.fix.pypi",
+	"Kubernetes token":                                            "secrets.fix.kube",
+	"Kubernetes client key":                                       "secrets.fix.kube",
+	"Kubernetes password":                                         "secrets.fix.kube",
+	"Kubernetes auth-provider token":                              "secrets.fix.kube",
+	"Kubernetes auth-provider secret":                             "secrets.fix.kube",
+}
+
+// fixFor is the fix for what is left to report: the advice for each kind of
+// credential store found, and the general one only when something else (a
+// key in a shell file, a .env) is among them. The note on rotating comes last.
+func fixFor(general msg.Text, found []secretFinding, bundles []string) msg.Text {
+	var specific msg.Text
+	seen := map[string]bool{}
+	other := len(bundles) > 0
+	for _, f := range found {
+		key, ok := credFix[f.kind]
+		if !ok {
+			other = true
+			continue
+		}
+		if !seen[key] {
+			seen[key] = true
+			specific = append(specific, msg.P(key))
+		}
+	}
+	if len(specific) == 0 {
+		return general
+	}
+	var out msg.Text
+	var rotate msg.Text
+	for _, p := range general {
+		if p.Key == "secrets.fix.rotate" {
+			rotate = append(rotate, p)
+		} else if other {
+			out = append(out, p)
+		}
+	}
+	return append(append(out, specific...), rotate...)
 }
 
 // chatState is how the scan of AI chat history went.

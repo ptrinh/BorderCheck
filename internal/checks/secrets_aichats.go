@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -557,6 +558,12 @@ func (s *secretScanner) chatHits(data []byte, segs [][2]int, extra []secretRule)
 					if r.random && !randomToken(v) {
 						continue
 					}
+					if r.kind == chatPasswordRule.kind && codeValue(v) {
+						continue
+					}
+					if r.kind == "Password in URL" && !realHost(urlHost(m+string(data[st+loc[1]:min(len(data), st+loc[1]+256)]))) {
+						continue
+					}
 					h := chatHit{at: st, rule: r.secretRule, match: m, vlo: st, vhi: st + loc[1]}
 					if g := r.valueGroup; g > 0 {
 						h.value = v
@@ -605,19 +612,27 @@ func (s *secretScanner) chatHits(data []byte, segs [][2]int, extra []secretRule)
 // findingsOf makes findings of hits: each distinct secret once.
 func (s *secretScanner) findingsOf(data []byte, hits []chatHit, shown string, withLines bool) []secretFinding {
 	var out []secretFinding
-	seen := map[[32]byte]bool{}
+	seen := map[[32]byte]int{} // index in out
 	line, counted := 1, 0
 	pathProd := s.prodRe.MatchString(shown)
 	for _, h := range hits {
-		key := sha256.Sum256([]byte(h.rule.kind + "\x00" + h.match))
-		if seen[key] {
-			continue // the same secret again in this conversation
-		}
-		seen[key] = true
-		f := secretFinding{path: shown, kind: h.rule.kind, name: h.name, severe: h.rule.high, prod: pathProd, chat: true}
 		if withLines {
 			line += bytes.Count(data[counted:h.at], []byte{'\n'})
 			counted = h.at
+		}
+		key := sha256.Sum256([]byte(h.rule.kind + "\x00" + h.match))
+		if i, ok := seen[key]; ok {
+			// The same secret again in this conversation: one finding, every line it is on.
+			r := out[i].ctx.rep
+			r.times++
+			if withLines && !slices.Contains(r.lines, line) {
+				r.lines = append(r.lines, line)
+			}
+			continue
+		}
+		seen[key] = len(out)
+		f := secretFinding{path: shown, kind: h.rule.kind, name: h.name, severe: h.rule.high, prod: pathProd, chat: true}
+		if withLines {
 			f.line = line
 		}
 		if s.showTail && h.rule.showTail && len(h.match) >= 20 {
@@ -633,6 +648,10 @@ func (s *secretScanner) findingsOf(data []byte, hits []chatHit, shown string, wi
 		}
 		if s.showTail && len(h.value) >= 12 {
 			f.ctx.tail = h.value[len(h.value)-4:]
+		}
+		f.ctx.rep = &repeats{times: 1}
+		if withLines {
+			f.ctx.rep.lines = []int{line}
 		}
 		out = append(out, f)
 	}
@@ -669,6 +688,10 @@ type ChatFinding struct {
 	Source    string    `json:"source,omitempty"`  // "prompt", "tool", "assistant", "user"
 	Project   string    `json:"project,omitempty"` // the folder the assistant was working in, if the file says
 	Assistant string    `json:"-"`                 // the assistant whose history it is; see App
+	// Times is how many times the same secret is in the file, and Lines every
+	// line it is on: deleting only the first would leave the others.
+	Times int   `json:"times"`
+	Lines []int `json:"lines,omitempty"`
 }
 
 // Item is the finding in a few words: "Stripe live key …p7dc",
@@ -684,10 +707,22 @@ func (f ChatFinding) Item() string {
 	return s
 }
 
-// Where is the file and line.
+// Where is the file and every line the secret is on, or how many times it
+// is there when lines are not known.
 func (f ChatFinding) Where() string {
-	if f.Line > 0 {
+	switch {
+	case len(f.Lines) > 1:
+		var ls []string
+		for _, l := range f.Lines {
+			ls = append(ls, strconv.Itoa(l))
+		}
+		return fmt.Sprintf("%s, lines %s", f.Path, strings.Join(ls, ", "))
+	case f.Line > 0 && f.Times > 1:
+		return fmt.Sprintf("%s, line %d (%d times on it)", f.Path, f.Line, f.Times)
+	case f.Line > 0:
 		return fmt.Sprintf("%s, line %d", f.Path, f.Line)
+	case f.Times > 1:
+		return fmt.Sprintf("%s (%d times)", f.Path, f.Times)
 	}
 	return f.Path
 }
@@ -761,7 +796,10 @@ func ScanAIChats(ctx context.Context, p policy.Secrets, since time.Time) ([]Chat
 	out := make([]ChatFinding, len(found))
 	for i, f := range found {
 		out[i] = ChatFinding{Path: f.path, Line: f.line, Kind: f.kind, Name: f.name, Tail: f.tail,
-			Host: f.ctx.host, When: f.ctx.when, Source: f.ctx.source, Project: f.ctx.project, Assistant: f.ctx.app}
+			Host: f.ctx.host, When: f.ctx.when, Source: f.ctx.source, Project: f.ctx.project, Assistant: f.ctx.app, Times: 1}
+		if r := f.ctx.rep; r != nil {
+			out[i].Times, out[i].Lines = r.times, r.lines
+		}
 		if out[i].Tail == "" {
 			out[i].Tail = f.ctx.tail
 		}
@@ -774,10 +812,17 @@ func ScanAIChats(ctx context.Context, p policy.Secrets, since time.Time) ([]Chat
 type chatContext struct {
 	app     string // the assistant whose history it is
 	when    time.Time
-	source  string // "prompt", "tool", "assistant", "user" or ""
-	project string // the folder the assistant was working in
-	host    string // for a password in a URL
-	tail    string // the last 4 characters of a long password
+	source  string   // "prompt", "tool", "assistant", "user" or ""
+	project string   // the folder the assistant was working in
+	host    string   // for a password in a URL
+	tail    string   // the last 4 characters of a long password
+	rep     *repeats // how often and on which lines it is in the file (a pointer keeps findings comparable)
+}
+
+// repeats: how many times one secret is in a file, and every line it is on.
+type repeats struct {
+	times int
+	lines []int
 }
 
 var (
@@ -875,6 +920,41 @@ func underHome(home, p string) string {
 	return p
 }
 
+var (
+	dottedName = regexp.MustCompile(`^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$`) // process.env.DB_PASSWORD, settings.password
+	envName    = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)                         // DATABASE_PASSWORD
+	hostName   = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?$`)
+)
+
+// codeValue: what is assigned to a password name in code rather than a
+// password: another variable, a field, a query string.
+func codeValue(v string) bool {
+	return dottedName.MatchString(v) || envName.MatchString(v) || strings.ContainsAny(v, "=&")
+}
+
+// realHost: what follows the "@" of a password in a URL is a host a login
+// could be for: a host name with an optional port, not a fragment of a
+// pattern or of prose, and not one used in examples.
+func realHost(h string) bool {
+	if !hostName.MatchString(h) {
+		return false
+	}
+	name := strings.ToLower(h)
+	if i := strings.LastIndexByte(name, ':'); i >= 0 {
+		name = name[:i]
+	}
+	switch name {
+	case "host", "hostname", "server", "domain", "example.com", "example.org", "example.net":
+		return false
+	}
+	for _, s := range []string{".example", ".example.com", ".example.org", ".example.net", ".invalid", ".test"} {
+		if strings.HasSuffix(name, s) {
+			return false
+		}
+	}
+	return true
+}
+
 // urlHost is the host of a URL with a password in it (and what follows),
 // without the login or the path.
 func urlHost(u string) string {
@@ -883,7 +963,7 @@ func urlHost(u string) string {
 		return ""
 	}
 	host := u[i+1:]
-	if j := strings.IndexAny(host, "/?#\\\"' "); j >= 0 {
+	if j := strings.IndexAny(host, "/?#\\\"' `)<>,;\n"); j >= 0 {
 		host = host[:j]
 	}
 	return host

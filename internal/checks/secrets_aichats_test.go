@@ -2,6 +2,7 @@ package checks
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -235,6 +236,11 @@ func TestChatInfoSuggestsTheGuard(t *testing.T) {
 	if strings.Contains(r.Summary, "guard") {
 		t.Errorf("guarded: %q", r.Summary)
 	}
+	// Nothing found anywhere, Claude Code used without the guard: suggested all the same.
+	r = evalSecretsSamples(nil, nil, false, chatState{unguarded: true}, secretFix(), nil, nil)
+	if r.Status != "pass" || !strings.Contains(r.Summary, "bordercheck guard install") {
+		t.Errorf("clean machine: %s %q", r.Status, r.Summary)
+	}
 }
 
 func TestEveryPromptCountsButOnlyRecentConversation(t *testing.T) {
@@ -365,5 +371,65 @@ func TestOtherAssistants(t *testing.T) {
 	}
 	if len(all) != len(want) {
 		t.Errorf("%d found, want %d: %v", len(all), len(want), got)
+	}
+}
+
+func TestCredentialStoresGetTheirOwnFix(t *testing.T) {
+	general := secretFix()
+	azure := secretFinding{path: "~/.azure/msal_token_cache.json", kind: "Azure CLI token cache (plain text)"}
+	gh := secretFinding{path: "~/.config/gh/hosts.yml", kind: "GitHub CLI token"}
+	env := secretFinding{path: "~/app/.env", line: 1, kind: "GitHub token"}
+
+	r := evalSecrets([]secretFinding{azure}, nil, false, general)
+	if !strings.Contains(r.Fix, "az logout") || strings.Contains(r.Fix, "touchenv set NAME, then") || !strings.Contains(r.Fix, "Rotate a key only") {
+		t.Errorf("azure only: %s", r.Fix)
+	}
+	r = evalSecrets([]secretFinding{azure, gh, env}, nil, false, general)
+	for _, want := range []string{"az logout", "gh auth login", "then delete the line or file", "Rotate a key only"} {
+		if !strings.Contains(r.Fix, want) {
+			t.Errorf("mixed: no %q in %s", want, r.Fix)
+		}
+	}
+	if r := evalSecrets([]secretFinding{env}, nil, false, general); strings.Contains(r.Fix, "az logout") {
+		t.Errorf("plain: %s", r.Fix)
+	}
+}
+
+func TestChatFalsePositives(t *testing.T) {
+	s := testScanner(t, policy.Default().Checks.Secrets)
+	data := strings.Join([]string{
+		// Passwords in code: a field, another variable, a query string.
+		`{"content":"password: process.env.E2E_DB_URL2, password = settings.db.pass9, PASSWORD=DATABASE_PASSWORD2, password=x1&sslmode=require"}`,
+		// A pattern, prose and examples, not URLs with logins.
+		"{\"content\":\"re := `^postgres://[^:]+:([^@]+)@.*|` and `smtp://user:pa55word@host:587` and https://u:pw123456@db.example.com/x\"}",
+		// Real ones still found.
+		`{"content":"DB_URL=postgres://app:Zq7pLw9mKx2@db.prod-eu.internal.corp:5432/app and password: Tr0ub4dor-x9"}`,
+	}, "\n")
+	var got []string
+	for _, f := range s.scanChat([]byte(data), "~/x.jsonl", true, nil) {
+		got = append(got, f.String())
+	}
+	want := []string{"~/x.jsonl:3  Password in URL", "~/x.jsonl:3  Password (password)"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got\n%s", strings.Join(got, "\n"))
+	}
+}
+
+func TestRepeatedSecretListsEveryLine(t *testing.T) {
+	s := testScanner(t, policy.Default().Checks.Secrets)
+	data := "a " + chatGH + "\nb\nc " + chatGH + " and again " + chatGH + "\nd " + chatGH + "\n"
+	got := s.scanChat([]byte(data), "~/x.jsonl", true, nil)
+	if len(got) != 1 || got[0].line != 1 || got[0].ctx.rep.times != 4 || fmt.Sprint(got[0].ctx.rep.lines) != "[1 3 4]" {
+		t.Fatalf("%+v", got)
+	}
+	f := ChatFinding{Path: "~/x.jsonl", Line: 1, Times: 4, Lines: []int{1, 3, 4}}
+	if f.Where() != "~/x.jsonl, lines 1, 3, 4" {
+		t.Errorf("where: %s", f.Where())
+	}
+	if w := (ChatFinding{Path: "~/x.jsonl", Line: 7, Times: 2, Lines: []int{7}}).Where(); w != "~/x.jsonl, line 7 (2 times on it)" {
+		t.Errorf("one line: %s", w)
+	}
+	if w := (ChatFinding{Path: "~/x.jsonl", Times: 3}).Where(); w != "~/x.jsonl (3 times)" {
+		t.Errorf("no lines: %s", w)
 	}
 }
