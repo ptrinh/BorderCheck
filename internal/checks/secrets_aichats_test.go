@@ -105,7 +105,7 @@ func TestScanChatsReadsRecentConversationsWithinBudget(t *testing.T) {
 		t.Fatalf("partial %v, found %v", partial, got)
 	}
 	// Ignored paths are left out; a budget of 0 reads nothing.
-	ign := func(p string) bool { return strings.Contains(p, "/.codex/") }
+	ign := func(p string) bool { return strings.Contains(filepath.ToSlash(p), "/.codex/") }
 	if got, _ := s.scanChats(t.Context(), home, monthAgo, 1<<20, ign); len(got) != 2 {
 		t.Errorf("with .codex ignored: %v", got)
 	}
@@ -205,10 +205,10 @@ func TestScanAIChatsReadsAllOfIt(t *testing.T) {
 		t.Fatalf("all: %v %v", err, all)
 	}
 	f := all[0]
-	if f.Item() != "GitHub token …"+chatGH[len(chatGH)-4:] || f.Where() != "~/.claude/projects/p/new.jsonl, line 1" {
+	if f.Item() != "GitHub token …"+chatGH[len(chatGH)-4:] || filepath.ToSlash(f.Where()) != "~/.claude/projects/p/new.jsonl, line 1" {
 		t.Errorf("first: %q %q", f.Item(), f.Where())
 	}
-	if got, want := f.Explain(home), "Claude Code, in ~/app, 3 Nov 2026, in a message you sent. Access to GitHub as you: your repositories, and possibly your organisation's."; got != want {
+	if got, want := filepath.ToSlash(f.Explain(home)), "Claude Code, in ~/app, 3 Nov 2026, in a message you sent. Access to GitHub as you: your repositories, and possibly your organisation's."; got != want {
 		t.Errorf("explain:\n got %s\nwant %s", got, want)
 	}
 	// new.jsonl changed an hour ago, but its message says 3 Nov 2026: not in the last 48 hours of 2030.
@@ -248,7 +248,7 @@ func TestEveryPromptCountsButOnlyRecentConversation(t *testing.T) {
 		`{"type":"user",`+old+`,"message":{"content":"`+chatAnt+`"}}`+"\n"+`{"type":"assistant","message":{"content":"ok"}}`+"\n", time.Hour)
 	s := testScanner(t, policy.Default().Checks.Secrets)
 	got, _ := s.scanChats(t.Context(), home, time.Now().Add(-48*time.Hour), 1<<20, func(string) bool { return false })
-	if len(got) != 1 || got[0].path != "~/.claude/history.jsonl" || got[0].kind != "GitHub token" {
+	if len(got) != 1 || filepath.ToSlash(got[0].path) != "~/.claude/history.jsonl" || got[0].kind != "GitHub token" {
 		t.Errorf("48 hours: %v", got)
 	}
 	// A budget smaller than the prompt history still reads all of it.
@@ -299,13 +299,13 @@ func TestAiderHistories(t *testing.T) {
 		byKind[f.Kind] = f
 	}
 	gh, pw, ant := byKind["GitHub token"], byKind["Password"], byKind["Anthropic API key"]
-	if gh.App() != "Aider" || gh.Source != "user" || gh.When.Format("2006-01-02 15:04") != "2026-11-03 09:15" || gh.Project != "~/code/api" {
+	if gh.App() != "Aider" || gh.Source != "user" || gh.When.Format("2006-01-02 15:04") != "2026-11-03 09:15" || filepath.ToSlash(gh.Project) != "~/code/api" {
 		t.Errorf("chat: %+v", gh)
 	}
 	if pw.Source != "tool" || ant.Source != "prompt" || ant.When.Year() != 2024 || ant.App() != "Aider" {
 		t.Errorf("tool %+v / typed %+v", pw, ant)
 	}
-	if got := gh.Explain(home); !strings.HasPrefix(got, "Aider, in ~/code/api, 3 Nov 2026, in a message you sent.") {
+	if got := filepath.ToSlash(gh.Explain(home)); !strings.HasPrefix(got, "Aider, in ~/code/api, 3 Nov 2026, in a message you sent.") {
 		t.Errorf("explain: %s", got)
 	}
 }

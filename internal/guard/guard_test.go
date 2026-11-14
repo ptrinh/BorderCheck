@@ -3,6 +3,7 @@ package guard
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -49,7 +50,7 @@ func TestInstallKeepsEverythingElse(t *testing.T) {
 		}
 		last = i
 	}
-	if st, _ := os.Stat(path); st.Mode().Perm() != 0o640 {
+	if st, _ := os.Stat(path); runtime.GOOS != "windows" && st.Mode().Perm() != 0o640 {
 		t.Errorf("mode %o", st.Mode().Perm())
 	}
 	// Again: nothing changes. After the program moved: replaced, not added.
@@ -131,7 +132,7 @@ func TestInstallIntoNothingAndBack(t *testing.T) {
 	if string(data) != want {
 		t.Errorf("got\n%s", data)
 	}
-	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(path); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("mode %o", st.Mode().Perm())
 	}
 	if _, err := Uninstall(path, ""); err != nil {
@@ -170,8 +171,9 @@ func TestCommandQuoting(t *testing.T) {
 			t.Errorf("%s: %s, want %s", bin, got, want)
 		}
 	}
-	t.Setenv("CLAUDE_CONFIG_DIR", "/etc/claude-an")
-	if p := SettingsPath("/home/an"); p != filepath.Join("/etc/claude-an", "settings.json") {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	if p := SettingsPath("/home/an"); p != filepath.Join(dir, "settings.json") {
 		t.Errorf("CLAUDE_CONFIG_DIR: %s", p)
 	}
 }
