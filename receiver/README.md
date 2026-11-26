@@ -124,6 +124,17 @@ waivers that name this machine's email or install_id, plus this machine's waiver
 `{"check", "install_id", "until", "reason"}`. Waivers that ended more than 30 days ago are left out. `401
 {"error": "unauthorized"}` for an unknown token, `401 {"error": "revoked"}` for a revoked one.
 
+**`POST /waiver-requests`** with `Authorization: Bearer <token>` (`bordercheck waiver request`): `{"check",
+"until": "YYYY-MM-DD", "reason", "accept_risk": true}`, checked like a waiver an admin adds (a check the portal
+offers, today to a year ahead, a reason of at most 300 characters) and `accept_risk` must be `true`. `201
+{"request_id", "check", "until", "status": "pending"}`; `400 {"error": "bad_request", "message"}`; `409
+already_requested` while one for that check is waiting, `409 too_many` at 20 waiting; `401` as for `/policy`.
+**`GET /waiver-requests`** (`bordercheck waiver list`): `{"data": [{"request_id", "check", "until", "reason",
+"status", "requested_at", "decided_at", "decision_note"}]}`, the latest 50. MCP `get_machine` and
+`GET /api/v1/machines/{install_id}` return them as `waiver_requests`, the reason under `untrusted`. Admins decide
+them on the machine's page, with MCP `approve_waiver_request` / `reject_waiver_request`, or
+`POST /api/v1/machines/{install_id}/waiver-requests/{request_id}/approve|reject`.
+
 **`POST /report`** with `Authorization: Bearer <token>`: as before, except `install_id` and `email` come from
 the token's enrollment and the body's are ignored (they may be absent). `401 {"error": "revoked"}` for a revoked
 token, and `401 {"error": "unauthorized"}` for anything that isn't an enrolled machine's token. Every accepted
@@ -482,6 +493,8 @@ Write (`MCP_TOKEN` only; the read-only token doesn't even list them):
 | `change_machine_role` | destructive, idempotent | One machine, one role |
 | `add_machine_waiver` | not destructive | One check, one machine, until a date at most a year ahead, with a reason |
 | `remove_machine_waiver` | destructive, idempotent | One waiver |
+| `approve_waiver_request` | not destructive | One pending waiver request (from `get_machine`'s `waiver_requests`): adds the waiver as asked, same checks as `add_machine_waiver` |
+| `reject_waiver_request` | not destructive | One pending waiver request, with an optional `note` the person sees |
 | `reset_report_links` | destructive, idempotent | One machine |
 
 **Deliberately absent**: Forget machine (irreversible deletion), deleting roles, anything about tokens or configuration, and anything that returns a machine token, a report link or any
@@ -627,6 +640,8 @@ All under `/api/v1`. Reads take either token; writes need `API_TOKEN`.
 | `GET /machines/{install_id}/waivers` | | That machine's waivers, active first |
 | `POST /machines/{install_id}/waivers` | `201` | `{"check", "until": "YYYY-MM-DD", "reason"}`: a known check, today to a year ahead |
 | `DELETE /machines/{install_id}/waivers/{waiver_id}` | | Ends it now (the record stays) |
+| `POST /machines/{install_id}/waiver-requests/{request_id}/approve` | | A pending [waiver request](#enrollment) from the person at the machine: adds the waiver as asked, same checks as above; `waiver_id` in the answer. `404` if it is not pending |
+| `POST /machines/{install_id}/waiver-requests/{request_id}/reject` | | Rejects it; optional `{"note"}` (at most 300 characters), which the person sees |
 | `POST /machines/{install_id}/report-links/reset` | | Ends that machine's login-free report links |
 | `GET /roles` | paged | With active machines and pending invites |
 | `POST /roles` | `201` | `{"name", "policy"}` (policy as an object or its text) |
@@ -798,6 +813,7 @@ Vars (`wrangler.jsonc`):
 | `invites` | Email, role, note, who made it, expiry, state; SHA-256 of the code | kept |
 | `enrollments` | Per enrolled machine: email, role, invite, hostname/OS at enrollment, revoked or not; SHA-256 of the token | kept (revoking keeps it) |
 | `machine_waivers` | Check, end date, reason, who added/removed it | kept |
+| `waiver_requests` | Waivers asked for from a machine: check, end date, reason, accepted risk, decision, who made it, note, the waiver an approval added | kept |
 | `audit` | Who changed what and when | kept |
 | `report_links` | SHA-256 of each live report link, its machine and expiry | until it expires or is replaced |
 | `rate_limits` | Request counts per hashed client IP | one window |
